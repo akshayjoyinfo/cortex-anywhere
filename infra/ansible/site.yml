@@ -1,0 +1,7 @@
+- hosts: all
+  become: true
+  roles: [common]
+- { hosts: data, become: true, roles: [data] }
+- { hosts: app,  become: true, roles: [app] }
+- { hosts: ops,  become: true, roles: [ops] }
+- { hosts: gpu,  become: true, roles: [gpu] }

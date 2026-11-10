@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- The single executable. First argument picks the role: web | worker. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cortex.ServiceDefaults\Cortex.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Cortex.Core\Cortex.Core.csproj" />
+    <ProjectReference Include="..\Cortex.Data\Cortex.Data.csproj" />
+    <ProjectReference Include="..\Cortex.Agents\Cortex.Agents.csproj" />
+    <ProjectReference Include="..\Cortex.Worker\Cortex.Worker.csproj" />
+  </ItemGroup>
+</Project>

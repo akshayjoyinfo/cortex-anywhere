@@ -1,0 +1,13 @@
+# Per tenant roles; the worker presents a tenant client cert (role = tenant id).
+# Default: deny. Tenant admins edit allow lists; Ansible renders this file.
+version: v1
+services:
+  - name: tenant-00000000-0000-0000-0000-00000000000a
+    project: tenants
+    action: enforce
+    allowed_domains: [api.hubspot.com]
+default:
+  name: default
+  project: none
+  action: enforce
+  allowed_domains: []

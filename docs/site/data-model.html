@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cortex Lite Data Ownership</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; ownership tree first, then where data lives, then lifecycle */
+:root{--bg:#f6f7f8;--panel:#ffffff;--fg:#1b2329;--muted:#5d6b75;--line:#d9dee2;--accent:#0f6e74;
+--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11171b;--panel:#182127;--fg:#e3e8eb;--muted:#93a1aa;--line:#2a363d;--accent:#5cc2c8;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#11171b;--panel:#182127;--fg:#e3e8eb;--muted:#93a1aa;--line:#2a363d;--accent:#5cc2c8;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans)}
+main{max-width:980px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:36px}
+h1{font-size:28px;margin:0;text-wrap:balance}
+h2{font-size:18px;margin:0 0 4px;text-wrap:balance}
+.lede{color:var(--muted);margin:6px 0 0;max-width:65ch}
+.tag{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+section{display:grid;gap:10px;min-width:0}
+.fig{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;overflow-x:auto}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+code{font:13px var(--mono)}
+.rule{border-left:3px solid var(--accent);padding:8px 12px;background:var(--panel)}
+</style>
+</head>
+<body>
+
+<main>
+<header>
+  <span class="tag">cortex-lite · data model</span>
+  <h1>Cortex Lite Data Ownership</h1>
+  <p class="lede">Who owns what, where it is stored, and which key protects it. The customer signs the contract; the tenant is the isolation unit.</p>
+</header>
+
+<div class="rule"><b>The boundary is the tenant, not the customer.</b> Two tenants of the same customer are isolated from each other like strangers. The CI leak test seeds exactly that case.</div>
+
+<section>
+  <span class="tag">1 · Ownership</span>
+  <h2>Platform → customer → tenant → everything else</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart TB
+  P[Platform · operators] --> C1[Customer: Acme GmbH<br/>contract, DPA]
+  P --> C2[Customer: Beta AG]
+  C1 --> T1[Tenant: Acme Sales<br/>pooled]
+  C1 --> T2[Tenant: Acme Support<br/>pooled]
+  C2 --> T3[Tenant: Beta<br/>silo, own model]
+  T1 --> U[Users and admins]
+  T1 -.later.-> TM[Teams]
+  T1 --> AG[Agents] --> RN[Runs]
+  T1 --> WF[Workflows]
+  T1 --> CN[Connections]
+  T1 --> ME[Memory namespaces]
+  T1 --> MG[MCP client grants]
+  </pre></div>
+</section>
+
+<section>
+  <span class="tag">2 · Database server</span>
+  <h2>srv-data: what is shared, what is per tenant</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart TB
+  subgraph PG[Postgres 16 + pgvector]
+    subgraph cortex[DB cortex · pooled tenants]
+      PL[schema cortex · platform<br/>customers 1-N tenants]
+      TT[schema cortex · tenant rows, FORCED RLS<br/>agents · runs · memory_item · audit_event]
+      HF[schema hangfire · shared<br/>jobs hold signed envelope only]
+    end
+    SI[DB cortex_t_beta · one silo tenant<br/>same migrations, same RLS]
+    KC[DB keycloak · realms]
+  end
+  subgraph VK[Valkey]
+    V1[t:&lt;tenant&gt;:session · t:&lt;tenant&gt;:wm:&lt;run&gt;<br/>sealed values, TTL]
+    V2[rl:&lt;tenant&gt; · quota:&lt;tenant&gt; · quarantine:&lt;tenant&gt;]
+    V3[hf:signal · shared, no payload]
+  end
+  subgraph OB[OpenBao]
+    O1[transit/keys/tenant-&lt;id&gt;<br/>one key per tenant]
+    O2[tenants/data/&lt;id&gt;/oauth<br/>connection tokens]
+    O3[auth/approle · web, worker]
+  end
+  </pre></div>
+  <div class="wrap"><table>
+    <tr><th>Level</th><th>Examples</th><th>Protection</th></tr>
+    <tr><td>Platform, shared</td><td><code>customers</code>, <code>hangfire.*</code>, <code>hf:signal</code>, AppRoles</td><td>No tenant data inside; app has no grant on customers</td></tr>
+    <tr><td>Tenant, 1-N rows</td><td><code>agents</code>, <code>runs</code>, <code>memory_item</code>, <code>t:&lt;id&gt;:*</code></td><td>RLS or key prefix, plus tenant key</td></tr>
+    <tr><td>Tenant, own instance</td><td><code>cortex_t_&lt;id&gt;</code> DB, <code>tenant-&lt;id&gt;</code> key</td><td>Separate database or key; RLS kept as second fence</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">3 · Access paths</span>
+  <h2>How web and worker reach srv-data</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart LR
+  subgraph app[srv-app]
+    W[Cortex.Web]
+    R[Cortex.Worker]
+  end
+  subgraph data[srv-data]
+    B[PgBouncer :6432<br/>transaction mode]
+    P[(Postgres)]
+    V[(Valkey :6379)]
+    O[OpenBao :8200]
+  end
+  W -->|cortex_app · set_config per tx| B
+  R -->|cortex_app · set_config per tx| B
+  B --> P
+  W -->|ACL user web · t:* keys| V
+  R -->|ACL user worker · t:* hf:*| V
+  W -->|AppRole web · transit, kv| O
+  R -->|AppRole worker · transit, kv| O
+  </pre></div>
+  <div class="wrap"><table>
+    <tr><th>Step</th><th>web</th><th>worker</th></tr>
+    <tr><td>Who is the tenant</td><td>JWT claim</td><td>Signed job envelope</td></tr>
+    <tr><td>Database</td><td>Short reads and writes</td><td>Run steps, memory, Hangfire jobs</td></tr>
+    <tr><td>Cache</td><td>Chat session, rate limit</td><td>Working memory, job signal</td></tr>
+    <tr><td>Keys</td><td>Decrypt for display</td><td>Encrypt memory, read OAuth tokens</td></tr>
+    <tr><td>Never</td><td>Calls the model or the internet</td><td>Reaches a host outside the allow list</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">4 · Where it lives</span>
+  <h2>Store, isolation and key per object</h2>
+  <div class="wrap"><table>
+    <tr><th>Object</th><th>Owner</th><th>Store</th><th>Isolated by</th><th>Encrypted with</th><th>Kept</th></tr>
+    <tr><td>Customer</td><td>Platform</td><td>Postgres</td><td>No app grant</td><td>Disk</td><td>Contract + legal</td></tr>
+    <tr><td>Tenant</td><td>Customer</td><td>Postgres</td><td>RLS on own id</td><td>Disk</td><td>Until offboard</td></tr>
+    <tr><td>User</td><td>Tenant</td><td>Keycloak</td><td>Group → <code>tenant_id</code> claim</td><td>Disk</td><td>Until removed</td></tr>
+    <tr><td>Agent, workflow</td><td>Tenant</td><td>Postgres</td><td>FORCED RLS</td><td>Disk</td><td>Until deleted</td></tr>
+    <tr><td>Run</td><td>Tenant</td><td>Postgres</td><td>FORCED RLS</td><td>Tenant key</td><td>90 days, max 180</td></tr>
+    <tr><td>Working memory</td><td>Tenant</td><td>Valkey</td><td>Key prefix <code>t:&lt;id&gt;:</code></td><td>Tenant key</td><td>24 h</td></tr>
+    <tr><td>Semantic memory</td><td>Tenant</td><td>pgvector</td><td>FORCED RLS</td><td>Tenant key</td><td>Until deleted</td></tr>
+    <tr><td>OAuth tokens</td><td>Tenant</td><td>OpenBao KV</td><td>Path per tenant</td><td>OpenBao</td><td>Until revoked</td></tr>
+    <tr><td>Audit event</td><td>Tenant</td><td>Postgres + Loki</td><td>RLS, append only</td><td>Disk</td><td>Per policy</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">5 · Placement</span>
+  <h2>Pooled and silo use the same schema</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart LR
+  R{tenants.tier} -->|pooled| DB1[(cortex DB<br/>Acme Sales, Acme Support, ...)]
+  R -->|silo| DB2[(cortex_t_beta DB<br/>own worker, own egress list)]
+  DB1 --- K[OpenBao: one key per tenant]
+  DB2 --- K
+  </pre></div>
+</section>
+
+<section>
+  <span class="tag">6 · Lifecycle</span>
+  <h2>What happens to a tenant's data</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart LR
+  O[Onboard<br/>row + realm group + key] --> A[Active] --> Q[Quarantined<br/>reversible]
+  Q --> A
+  A --> S[Move to silo]
+  A --> F[Offboard<br/>delete key = crypto shred]
+  Q --> F
+  </pre></div>
+</section>
+</main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+</script>
+</body>
+</html>

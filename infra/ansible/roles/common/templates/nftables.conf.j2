@@ -1,0 +1,35 @@
+#!/usr/sbin/nft -f
+# Private network filtering (Hetzner Cloud firewalls do not cover it).
+flush ruleset
+table inet host {
+  chain input {
+    type filter hook input priority 0; policy drop;
+    iif lo accept
+    ct state established,related accept
+    iifname "tailscale0" tcp dport 22 accept
+{% if 'data' in group_names %}
+    ip saddr 10.10.1.10 tcp dport { 6432, 6379, 8200 } accept
+{% endif %}
+{% if 'gpu' in group_names %}
+    ip saddr 10.10.1.10 tcp dport 8000 accept
+{% endif %}
+{% if 'app' in group_names %}
+    tcp dport 443 accept
+{% endif %}
+{% if 'ops' in group_names %}
+    tcp dport 443 accept
+    udp dport 3478 accept
+    ip saddr 10.10.0.0/16 tcp dport { 3100, 4317 } accept
+{% else %}
+    ip saddr 10.10.1.30 tcp dport 9100 accept
+{% endif %}
+  }
+{% if 'gpu' in group_names %}
+  chain output {
+    type filter hook output priority 0; policy drop;   # srv-gpu: no egress
+    oif lo accept
+    ct state established,related accept
+    oifname "tailscale0" accept
+  }
+{% endif %}
+}

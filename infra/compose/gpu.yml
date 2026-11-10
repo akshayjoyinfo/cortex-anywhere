@@ -1,0 +1,11 @@
+# srv-gpu. No egress: weights are copied in at provisioning.
+# Prefix caching stays on only while the T16 timing probe passes.
+name: cortex-gpu
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.11.0
+    command: [--model, /models/Qwen3-14B-AWQ, --served-model-name, qwen3-14b,
+              --prefix-caching-hash-algo, sha256, --max-num-seqs, "32"]   # flag names unverified
+    volumes: [/srv/models:/models:ro]
+    ports: ["10.10.2.10:8000:8000"]
+    deploy: { resources: { reservations: { devices: [{ capabilities: [gpu] }] } } }

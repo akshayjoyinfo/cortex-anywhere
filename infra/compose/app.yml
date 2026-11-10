@@ -1,0 +1,54 @@
+# srv-app. Image tags: pin by digest at deploy (tags here unverified).
+# web and worker sit on fixed subnets so DOCKER-USER rules can scope egress.
+name: cortex-app
+services:
+  traefik:
+    image: traefik:v3.4
+    command: [--providers.docker=true, --providers.docker.exposedbydefault=false,
+              --entrypoints.websecure.address=:443,
+              --certificatesresolvers.le.acme.tlschallenge=true]
+    ports: ["443:443"]
+    volumes: [/var/run/docker.sock:/var/run/docker.sock:ro, acme:/acme]
+    networks: [edge]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    command: [start, --import-realm, --proxy-headers=xforwarded, --hostname=auth.cortex.example]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://10.10.1.20:6432/keycloak
+    volumes: [../ansible/roles/app/files/realm-tenants.json:/opt/keycloak/data/import/realm-tenants.json:ro]
+    labels: [traefik.enable=true, "traefik.http.routers.kc.rule=Host(`auth.cortex.example`)", traefik.http.routers.kc.tls.certresolver=le]
+    networks: [edge]
+
+  web:
+    image: ghcr.io/cortex-lite/cortex:${CORTEX_TAG}
+    command: [web]
+    environment:
+      ConnectionStrings__Cortex: Host=10.10.1.20;Port=6432;Database=cortex;Username=cortex_app
+      Vault__Address: http://10.10.1.20:8200
+      Vault__RoleIdFile: /run/secrets/web_role_id
+    labels: [traefik.enable=true, "traefik.http.routers.web.rule=Host(`app.cortex.example`)", traefik.http.routers.web.tls.certresolver=le]
+    networks: [edge, web]
+
+  worker:
+    image: ghcr.io/cortex-lite/cortex:${CORTEX_TAG}
+    command: [worker]
+    environment:
+      ConnectionStrings__Cortex: Host=10.10.1.20;Port=6432;Database=cortex;Username=cortex_app
+      Llm__Endpoint: http://10.10.2.10:8000/v1
+      HTTPS_PROXY: http://smokescreen:4750
+    networks: [worker]
+
+  smokescreen:
+    image: cortex-lite/smokescreen:local   # built from github.com/stripe/smokescreen
+    command: [--egress-acl-file=/etc/smokescreen/acl.yaml, --listen-port=4750]
+    volumes: [./smokescreen-acl.yaml:/etc/smokescreen/acl.yaml:ro]
+    networks: [worker, egress]
+
+volumes: { acme: {} }
+networks:
+  edge:   {}
+  web:    { ipam: { config: [{ subnet: 172.31.0.0/24 }] } }   # no egress
+  worker: { ipam: { config: [{ subnet: 172.30.0.0/24 }] } }   # srv-data, srv-gpu, smokescreen only
+  egress: {}

@@ -1,0 +1,8 @@
+# srv-ops. Headscale is the only public service here.
+name: cortex-ops
+services:
+  headscale:  { image: headscale/headscale:0.26.0, command: [serve], ports: ["443:443", "3478:3478/udp"] }
+  prometheus: { image: prom/prometheus:v3.4.0 }
+  loki:       { image: grafana/loki:3.5.0, ports: ["10.10.1.30:3100:3100"] }
+  tempo:      { image: grafana/tempo:2.8.0, ports: ["10.10.1.30:4317:4317"] }
+  grafana:    { image: grafana/grafana:12.0.0, ports: ["100.64.0.1:3000:3000"] }  # tailnet only

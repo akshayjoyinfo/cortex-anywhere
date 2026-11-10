@@ -1,0 +1,62 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions: { contents: read }
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 10.0.x }
+      - run: dotnet build Cortex.sln -c Release
+      - run: dotnet test tests/Cortex.UnitTests -c Release --no-build
+
+  integration:          # Testcontainers uses the runner's Docker
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 10.0.x }
+      - run: dotnet test tests/Cortex.IntegrationTests -c Release
+
+  security:             # isolation gate: database layer, then app layer
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env: { POSTGRES_USER: cortex_owner, POSTGRES_PASSWORD: ci, POSTGRES_DB: cortex }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    env: { PGHOST: localhost, PGUSER: cortex_owner, PGPASSWORD: ci, PGDATABASE: cortex }
+    steps:
+      - uses: actions/checkout@v4
+      - run: psql -v ON_ERROR_STOP=1 -f db/migrations/0001_tenancy.sql
+      - name: Every tenant table has FORCED RLS
+        run: test -z "$(psql -tA -f db/checks/rls_forced.sql)"
+      - name: Fail closed at the database
+        run: psql -v ON_ERROR_STOP=1 -f db/checks/fail_closed.sql
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 10.0.x }
+      - name: Leak suite and prompt injection corpus
+        run: dotnet test tests/Cortex.SecurityTests -c Release
+
+  image:
+    needs: [unit, integration, security]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions: { contents: read, packages: write, id-token: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - id: build
+        uses: docker/build-push-action@v6
+        with: { push: true, tags: "${{ steps.name.outputs.image }}:${{ github.sha }}" }
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign (servers verify before pull)
+        run: cosign sign --yes "${{ steps.name.outputs.image }}@${{ steps.build.outputs.digest }}"

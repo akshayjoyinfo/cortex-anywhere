@@ -1,0 +1,24 @@
+# srv-data. Listens on the private IP only.
+name: cortex-data
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg16
+    command: [postgres, -c, shared_preload_libraries=pgaudit, -c, archive_mode=on,
+              -c, "archive_command=pgbackrest --stanza=cortex archive-push %p"]
+    environment: { POSTGRES_USER: cortex_owner, POSTGRES_PASSWORD_FILE: /run/secrets/pg_owner }
+    volumes: [pg:/var/lib/postgresql/data, ../../db/migrations:/docker-entrypoint-initdb.d:ro]
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.24.1-p1    # unverified tag
+    volumes: [../ansible/roles/data/files/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro]
+    ports: ["10.10.1.20:6432:6432"]
+  valkey:
+    image: valkey/valkey:8.1
+    command: [valkey-server, --aclfile, /etc/valkey/users.acl]
+    volumes: [../ansible/roles/data/files/valkey-users.acl:/etc/valkey/users.acl:ro]
+    ports: ["10.10.1.20:6379:6379"]
+  openbao:                                 # Vault API compatible, MPL licence
+    image: openbao/openbao:2.2
+    command: [server, -config=/etc/openbao/config.hcl]
+    cap_add: [IPC_LOCK]
+    ports: ["10.10.1.20:8200:8200"]
+volumes: { pg: {} }

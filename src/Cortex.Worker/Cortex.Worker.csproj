@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Hangfire.AspNetCore" />
+    <PackageReference Include="Hangfire.PostgreSql" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cortex.Core\Cortex.Core.csproj" />
+    <ProjectReference Include="..\Cortex.Agents\Cortex.Agents.csproj" />
+  </ItemGroup>
+</Project>

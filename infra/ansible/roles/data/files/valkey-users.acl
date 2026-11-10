@@ -1,0 +1,4 @@
+# Keys are always t:<tenant_id>:... built from TenantContext; values sealed with tenant key.
+user default off
+user web    on #<sha256-web>    ~t:* &t:* +@read +@write +@pubsub -@dangerous
+user worker on #<sha256-worker> ~t:* ~hf:* &t:* +@read +@write +@pubsub -@dangerous

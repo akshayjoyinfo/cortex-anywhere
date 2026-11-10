@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cortex Lite Architecture</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column, each section = one short diagram + at most one table */
+:root{--bg:#f6f7f8;--panel:#ffffff;--fg:#1b2329;--muted:#5d6b75;--line:#d9dee2;--accent:#0f6e74;
+--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11171b;--panel:#182127;--fg:#e3e8eb;--muted:#93a1aa;--line:#2a363d;--accent:#5cc2c8;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#11171b;--panel:#182127;--fg:#e3e8eb;--muted:#93a1aa;--line:#2a363d;--accent:#5cc2c8;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans)}
+main{max-width:980px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:36px}
+h1{font-size:28px;margin:0;text-wrap:balance}
+h2{font-size:18px;margin:0 0 4px;text-wrap:balance}
+.lede{color:var(--muted);margin:6px 0 0;max-width:65ch}
+.tag{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+section{display:grid;gap:10px;min-width:0}
+.fig{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;overflow-x:auto}
+pre.tree{font:13px/1.5 var(--mono);margin:0;color:var(--fg)}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+code{font:13px var(--mono)}
+.rule{border-left:3px solid var(--accent);padding:8px 12px;background:var(--panel)}
+</style>
+</head>
+<body>
+
+<main>
+<header>
+  <span class="tag">cortex-lite · day zero</span>
+  <h1>Cortex Lite Architecture</h1>
+  <p class="lede">Multi tenant AI agents on Hetzner. One codebase, three cloud servers and one GPU. Postgres row level security is the guarantee; the model is treated as hostile.</p>
+</header>
+
+<div class="rule"><b>Fail closed.</b> Right tenant's data, or no data. Never another tenant's data, whatever the model does.</div>
+
+<section>
+  <span class="tag">1 · Folder architecture</span>
+  <h2>One repo, modules inside one monolith</h2>
+  <div class="fig"><pre class="tree">cortex-lite/
+├─ docs/            00–14, adr/, site/ (these pages)
+├─ db/              migrations/ (fail closed SQL), checks/ (CI gates)
+├─ infra/           terraform/ · ansible/ · compose/  (one per server)
+├─ src/
+│  ├─ Cortex.Web           single executable: web | worker
+│  ├─ Cortex.Core          TenantContext, middleware, tenant scoped DI
+│  ├─ Cortex.Data          DbContext, set_config interceptor
+│  ├─ Cortex.Agents        run loop, tool allow list, LLM gateway
+│  ├─ Cortex.Worker        Hangfire jobs, signed envelopes
+│  └─ Cortex.ServiceDefaults  OpenTelemetry, health
+├─ tests/           Unit · Integration · Security (leak + injection) · perf/
+└─ Cortex.sln       Directory.*.props at root</pre></div>
+  <div class="wrap"><table>
+    <tr><th>Rule</th><th>Why</th></tr>
+    <tr><td>Core references nothing; everyone references Core</td><td>Tenant identity has one source</td></tr>
+    <tr><td>Only Data talks SQL; only Agents talks to the model</td><td>Each guardrail lives in one project</td></tr>
+    <tr><td>New feature = folder inside a module, not a new project</td><td>No microservice drift</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">2 · C1 context</span>
+  <h2>Who and what touches the system</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart LR
+  U([Tenant users]) -->|OIDC| C[Cortex Lite]
+  A([Tenant admin]) -->|OIDC| C
+  O([Operator]) -->|Headscale| C
+  M[n8n · AI assistants via MCP] -->|tenant token| C
+  C -->|allow listed| S[Tenant SaaS]
+  S -->|signed webhook| C
+  C -->|silo only| B[Tenant own model]
+  </pre></div>
+</section>
+
+<section>
+  <span class="tag">3 · C2 containers</span>
+  <h2>One image, two roles, four servers</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart LR
+  subgraph app[srv-app]
+    T[Traefik] --> W[web] & K[Keycloak]
+    R[worker] --> X[Smokescreen]
+  end
+  subgraph data[srv-data]
+    P[(Postgres + pgvector)]
+    V[(Valkey)]
+    B[OpenBao]
+  end
+  subgraph gpu[srv-gpu]
+    L[vLLM · Qwen3-14B]
+  end
+  W --> P & V & B
+  R --> P & V & B
+  R --> L
+  X --> S[Tenant SaaS]
+  </pre></div>
+</section>
+
+<section>
+  <span class="tag">4 · System architecture</span>
+  <h2>Where each guardrail sits</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart TB
+  E[Edge: TLS, JWT, rate limit per tenant] --> A[App: TenantContext, tools bound by DI, allow lists]
+  A --> D[Data: FORCED RLS, set_config per transaction]
+  A --> K[Keys: one OpenBao key per tenant]
+  A --> N[Network: worker egress via Smokescreen only]
+  A --> G[Model: cache_salt per tenant, no egress]
+  </pre></div>
+</section>
+
+<section>
+  <span class="tag">5 · Enterprise architecture</span>
+  <h2>Business to technology, four layers</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart TB
+  subgraph Business
+    B1[Sell agents to B2B customers] --- B2[Onboard customers and tenants] --- B3[Operate and audit]
+  end
+  subgraph Application
+    A1[Agent runtime] --- A2[Workflows] --- A3[Memory + MCP] --- A4[Admin console]
+  end
+  subgraph Data
+    D1[(Customer, tenant, agent, run, memory)] --- D2[(Audit log)]
+  end
+  subgraph Technology
+    T1[Hetzner Cloud x3 + GEX44] --- T2[Postgres · Valkey · OpenBao · Keycloak] --- T3[Grafana · Headscale]
+  end
+  Business --> Application --> Data --> Technology
+  </pre></div>
+</section>
+
+<section>
+  <span class="tag">6 · Integration</span>
+  <h2>Every path in and out, and what binds the tenant</h2>
+  <div class="wrap"><table>
+    <tr><th>Path</th><th>Direction</th><th>Protocol</th><th>Tenant bound by</th></tr>
+    <tr><td>Users, admins</td><td>In</td><td>HTTPS + OIDC</td><td><code>tenant_id</code> claim</td></tr>
+    <tr><td>n8n, AI assistants</td><td>In</td><td>MCP over HTTPS</td><td>OAuth token per client grant</td></tr>
+    <tr><td>SaaS webhooks</td><td>In</td><td>Signed POST</td><td>Secret path per connection</td></tr>
+    <tr><td>web → worker</td><td>Internal</td><td>Hangfire + Valkey signal</td><td>HMAC signed envelope</td></tr>
+    <tr><td>worker → vLLM</td><td>Internal</td><td>OpenAI API</td><td><code>cache_salt</code> from TenantContext</td></tr>
+    <tr><td>Tools → SaaS</td><td>Out</td><td>HTTPS via Smokescreen</td><td>Client cert role = tenant allow list</td></tr>
+    <tr><td>Backups</td><td>Out</td><td>S3 (pgBackRest)</td><td>Ciphertext only</td></tr>
+  </table></div>
+</section>
+</main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+</script>
+</body>
+</html>

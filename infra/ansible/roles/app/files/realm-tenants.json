@@ -1,0 +1,28 @@
+{
+  "realm": "tenants",
+  "enabled": true,
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "cortex-web",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["https://app.cortex.example/*"],
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "_comment": "tenant_id must be admin edit only in the user profile (unmanagedAttributePolicy ADMIN_EDIT). Operators use the separate 'operators' realm."
+}

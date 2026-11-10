@@ -1,0 +1,7 @@
+- name: Ship infra and migrations (compose paths are repo relative)
+  ansible.builtin.copy: { src: "{{ playbook_dir }}/../../{{ item }}", dest: /srv/cortex/repo/ }
+  loop: [infra, db]
+- name: Start stack
+  ansible.builtin.command: docker compose -f /srv/cortex/repo/infra/compose/app.yml up -d
+- name: Scope container egress (DOCKER-USER)
+  ansible.builtin.script: files/docker-user.sh

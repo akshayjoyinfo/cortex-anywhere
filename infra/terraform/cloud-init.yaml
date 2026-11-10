@@ -1,0 +1,12 @@
+#cloud-config
+# No public SSH: the cloud firewall drops 22; sshd is reached via tailnet only.
+# srv-ops is bootstrapped once from the Hetzner console (runs Headscale).
+package_update: true
+packages: [docker.io, docker-compose-v2, nftables]
+runcmd:
+  - curl -fsSL https://tailscale.com/install.sh | sh
+%{ if is_ops ~}
+  - echo "bootstrap Headscale from console: infra/ansible/roles/ops"
+%{ else ~}
+  - tailscale up --login-server https://hs.cortex.example --authkey ${headscale_authkey}
+%{ endif ~}
