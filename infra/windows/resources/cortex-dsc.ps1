@@ -111,7 +111,8 @@ function Expand-ZipSubset([string] $Zip, [string] $Dest, [string] $StripPrefix, 
       if (-not $n.StartsWith($StripPrefix)) { continue }
       $rel = $n.Substring($StripPrefix.Length)
       if ($rel -match '(^|/)\.\.(/|$)') { throw "unsafe zip entry $n" }
-      if (-not ($Include | Where-Object { $rel.StartsWith($_) })) { continue }
+      # Count matches: an include prefix of '' (everything) is itself falsy in PowerShell.
+      if (@($Include | Where-Object { $rel.StartsWith($_) }).Count -eq 0) { continue }
       $target = Join-Path $Dest ($rel -replace '/', '\')
       if ($n.EndsWith('/')) { New-Item -ItemType Directory -Force $target | Out-Null; continue }
       New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
@@ -120,6 +121,7 @@ function Expand-ZipSubset([string] $Zip, [string] $Dest, [string] $StripPrefix, 
     }
   } finally { $z.Dispose() }
   Write-Step 'extracted' @{ zip = $Zip; dest = $Dest; files = $count }
+  if ($count -eq 0) { throw "extracted 0 files from $Zip (prefix '$StripPrefix', include $($Include -join ','))" }
 }
 
 function Get-Listeners([int] $Port) {
