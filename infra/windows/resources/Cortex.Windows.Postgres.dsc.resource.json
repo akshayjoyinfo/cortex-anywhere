@@ -1,0 +1,161 @@
+{
+  "$schema": "https://aka.ms/dsc/schemas/v3/bundled/resource/manifest.json",
+  "type": "Cortex.Windows/Postgres",
+  "version": "0.1.0",
+  "description": "Pinned PostgreSQL binaries, one cluster, one Windows service, loopback only.",
+  "tags": [
+    "cortex",
+    "windows"
+  ],
+  "get": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "Postgres",
+      "-Operation",
+      "get"
+    ],
+    "input": "stdin"
+  },
+  "test": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "Postgres",
+      "-Operation",
+      "test"
+    ],
+    "input": "stdin",
+    "return": "state"
+  },
+  "set": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "Postgres",
+      "-Operation",
+      "set"
+    ],
+    "input": "stdin",
+    "implementsPretest": true,
+    "return": "state"
+  },
+  "exitCodes": {
+    "0": "Success",
+    "1": "Error, see stderr and steps.jsonl"
+  },
+  "schema": {
+    "embedded": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "version",
+        "url",
+        "sha256",
+        "installDir",
+        "dataDir",
+        "serviceName",
+        "port",
+        "listenAddresses"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$|^PENDING$"
+        },
+        "installDir": {
+          "type": "string"
+        },
+        "dataDir": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "listenAddresses": {
+          "type": "string"
+        },
+        "serverVersion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "clusterMajor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "serviceState": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "serviceStartMode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "listeningOn": {
+          "type": "array",
+          "readOnly": true
+        },
+        "superuserSecret": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "readOnly": true
+        },
+        "_inDesiredState": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "readOnly": true
+        }
+      }
+    }
+  }
+}
