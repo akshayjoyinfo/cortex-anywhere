@@ -9,5 +9,6 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app .
 USER $APP_UID
+ENV CORTEX_PROFILE=server
 ENTRYPOINT ["dotnet", "Cortex.Web.dll"]
 CMD ["web"]
