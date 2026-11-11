@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -174,6 +175,7 @@ public sealed class LocalSecretsAndDatabaseTests
     }
 
     [Fact]
+    [SupportedOSPlatform("windows")]   // analyzer: guard does not reach into lambdas; skipped at runtime elsewhere
     public void Dpapi_store_reads_an_installer_written_secret_and_rejects_path_tricks()
     {
         if (OperatingSystem.IsWindows())
