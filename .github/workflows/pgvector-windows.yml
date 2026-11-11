@@ -1,0 +1,108 @@
+name: pgvector-windows
+# Builds pgvector once, in CI, against the exact PostgreSQL build Cortex pins (ADR 014).
+# Targets download the result by URL and SHA256; no customer machine compiles C.
+# Releases are immutable: re-running for an existing tag fails.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write       # create the release
+  id-token: write       # build provenance
+  attestations: write
+
+env:
+  PG_VERSION: 16.15-5
+  PG_ZIP_URL: https://get.enterprisedb.com/postgresql/postgresql-16.15-5-windows-x64-binaries.zip
+  PG_ZIP_SHA256: 43bb45f173a6f08cf1d29a97a6d8deb119e8e8093a24c00d2d1001a0ccaa8281
+  PGVECTOR_VERSION: 0.8.7
+  PGVECTOR_COMMIT: f37c13f68b57d2c3472b2214fbcff699d6d34876
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: ilammy/msvc-dev-cmd@v1.13.0
+        with: { arch: x64 }
+
+      - name: PostgreSQL binaries (pinned, hash checked)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest $env:PG_ZIP_URL -OutFile pg.zip
+          $h = (Get-FileHash pg.zip -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne $env:PG_ZIP_SHA256) { throw "postgres zip sha256 is $h" }
+          New-Item -ItemType Directory C:\pg | Out-Null
+          & "$env:SystemRoot\System32\tar.exe" -xf pg.zip -C C:\pg pgsql/bin pgsql/lib pgsql/share pgsql/include
+          if ($LASTEXITCODE) { throw 'extract failed' }
+
+      - name: pgvector source (pinned commit)
+        shell: pwsh
+        run: |
+          git clone --branch "v$env:PGVECTOR_VERSION" --depth 1 https://github.com/pgvector/pgvector.git
+          $c = git -C pgvector rev-parse HEAD
+          if ($c -ne $env:PGVECTOR_COMMIT) { throw "tag points to $c, expected $env:PGVECTOR_COMMIT" }
+
+      - name: Build and install into the pinned tree
+        shell: cmd
+        working-directory: pgvector
+        run: |
+          set "PGROOT=C:\pg\pgsql"
+          nmake /F Makefile.win || exit /b 1
+          nmake /F Makefile.win install || exit /b 1
+
+      - name: Smoke test (extension loads, HNSW index is used)
+        shell: pwsh
+        run: |
+          $bin = 'C:\pg\pgsql\bin'
+          & "$bin\initdb.exe" -D C:\pgdata -U postgres -A trust -E UTF8 --locale=C
+          if ($LASTEXITCODE) { throw 'initdb failed' }
+          & "$bin\pg_ctl.exe" -D C:\pgdata -l C:\pg.log -o "-p 5499" -w start
+          if ($LASTEXITCODE) { Get-Content C:\pg.log; throw 'start failed' }
+          $sql = @(
+            'CREATE EXTENSION vector',
+            'CREATE TABLE t (e vector(3))',
+            'INSERT INTO t SELECT ARRAY[random(), random(), random()]::vector FROM generate_series(1, 1000)',
+            'CREATE INDEX ON t USING hnsw (e vector_cosine_ops)',
+            'SET enable_seqscan = off',
+            "EXPLAIN (COSTS OFF) SELECT * FROM t ORDER BY e <=> '[1,1,1]' LIMIT 3",
+            "SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+          $a = @('-X', '-p', '5499', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1') + ($sql | ForEach-Object { '-c', $_ })
+          & "$bin\psql.exe" @a | Tee-Object smoke.txt
+          if ($LASTEXITCODE) { throw 'smoke failed' }
+          if (-not (Select-String -Path smoke.txt -Pattern 'Index Scan using' -Quiet)) { throw 'HNSW index not used' }
+          if (-not (Select-String -Path smoke.txt -Pattern "^\s*$env:PGVECTOR_VERSION\s*$" -Quiet)) { throw 'wrong extension version' }
+          & "$bin\pg_ctl.exe" -D C:\pgdata -w stop
+
+      - name: Package
+        id: pkg
+        shell: pwsh
+        run: |
+          $name = "pgvector-$env:PGVECTOR_VERSION-pg$env:PG_VERSION-windows-x64"
+          New-Item -ItemType Directory -Force stage\lib, stage\share\extension, stage\include\server\extension\vector | Out-Null
+          Copy-Item C:\pg\pgsql\lib\vector.dll stage\lib\
+          Copy-Item C:\pg\pgsql\share\extension\vector.control, C:\pg\pgsql\share\extension\vector--*.sql stage\share\extension\
+          Copy-Item C:\pg\pgsql\include\server\extension\vector\*.h stage\include\server\extension\vector\
+          [ordered]@{
+            pgvector = $env:PGVECTOR_VERSION; pgvector_commit = $env:PGVECTOR_COMMIT
+            postgres = $env:PG_VERSION; postgres_zip_sha256 = $env:PG_ZIP_SHA256
+            msvc = $env:VCToolsVersion; runner = $env:ImageOS + ' ' + $env:ImageVersion
+            run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            source_commit = $env:GITHUB_SHA
+          } | ConvertTo-Json | Set-Content stage\BUILDINFO.json
+          Compress-Archive -Path stage\* -DestinationPath "$name.zip"
+          $h = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$h  $name.zip" | Set-Content "$name.zip.sha256"
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "### $name`nsha256: ``$h``" >> $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-path: ${{ steps.pkg.outputs.name }}.zip
+
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $n = '${{ steps.pkg.outputs.name }}'
+          gh release create $n "$n.zip" "$n.zip.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title $n --notes-file stage\BUILDINFO.json
+          if ($LASTEXITCODE) { throw 'release failed (tag exists? releases are immutable)' }
