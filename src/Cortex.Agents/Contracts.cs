@@ -14,11 +14,8 @@ public sealed record AgentRunResult(string Output, int Steps, AgentStopReason St
 
 public enum AgentStopReason { Answered, MaxSteps, Budget, Quarantined, Refused }
 
-/// <summary>Per agent allow list. Unknown tool names never resolve.</summary>
-public interface IToolAllowList
-{
-    bool IsAllowed(Guid agentId, string toolName);
-}
+// Per agent allow list: ToolRegistry.ForAgent returns an AgentToolSet (Tools.cs).
+// Unknown or unlisted tool names never resolve.
 
 /// <summary>
 /// A tool already bound to the current tenant by DI. Its schema exposes business

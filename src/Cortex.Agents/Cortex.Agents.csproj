@@ -3,6 +3,8 @@
     <!-- Semantic Kernel drives the loop; IChatClient keeps the model swappable. -->
     <PackageReference Include="Microsoft.SemanticKernel" />
     <PackageReference Include="Microsoft.Extensions.AI" />
+    <!-- One OpenAI compatible client for Ollama (local) and vLLM (server). -->
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cortex.Core\Cortex.Core.csproj" />

@@ -1,9 +1,21 @@
+using Cortex.Core;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Cortex.Agents;
 
 public static class AgentsModule
 {
-    /// <summary>Stub: runtime, gateway, allow list and output policy are registered Scoped here.</summary>
-    public static IServiceCollection AddCortexAgents(this IServiceCollection services) => services;
+    /// <summary>Gateway validates its endpoint at startup. Tools and their registry are Scoped (tenant bound).</summary>
+    public static IServiceCollection AddCortexAgents(this IServiceCollection services, IConfiguration configuration, CortexProfile profile)
+    {
+        var model = configuration.GetSection(ModelOptions.Section).Get<ModelOptions>() ?? new ModelOptions();
+        OpenAiCompatibleGateway.Validate(model, profile);   // fail at startup, not on the first request
+
+        services.AddSingleton(model);
+        services.AddSingleton<ILlmGateway>(sp =>
+            new OpenAiCompatibleGateway(model, profile, sp.GetRequiredService<ITenantContextAccessor>()));
+        services.AddScoped<ToolRegistry>();
+        return services;
+    }
 }
