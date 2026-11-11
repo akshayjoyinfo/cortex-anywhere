@@ -404,7 +404,7 @@ function Get-DatabaseState($d) {
   $dbExists = (Invoke-Psql $d 'postgres' @('-c', "SELECT count(*) FROM pg_database WHERE datname = '$db'")).Out.Trim() -eq '1'
   $installed = @(); $applied = @{}
   if ($dbExists) {
-    $installed = Get-Lines (Invoke-Psql $d $db @('-c', 'SELECT extname || $$=$$ || extversion FROM pg_extension ORDER BY 1')).Out
+    $installed = @(Get-Lines (Invoke-Psql $d $db @('-c', 'SELECT extname || $$=$$ || extversion FROM pg_extension ORDER BY 1')).Out)
     $hasOps = (Invoke-Psql $d $db @('-c', "SELECT to_regclass('cortex_ops.schema_migrations') IS NOT NULL")).Out.Trim() -eq 't'
     if ($hasOps) {
       foreach ($l in (Get-Lines (Invoke-Psql $d $db @('-c', "SELECT name || '|' || sha256 FROM cortex_ops.schema_migrations ORDER BY name")).Out)) {
@@ -521,7 +521,7 @@ function Get-DotnetSdkState($d) {
   if (Test-Path $marker) { $haveHash = (Get-Content $marker -Raw | ConvertFrom-Json).sha512 }
   $sdks = @()
   $exe = Join-Path $dir 'dotnet.exe'
-  if (Test-Path $exe) { $sdks = Get-Lines (Invoke-Native $exe @('--list-sdks')).Out }
+  if (Test-Path $exe) { $sdks = @(Get-Lines (Invoke-Native $exe @('--list-sdks')).Out) }   # @(): one SDK must stay an array
   if ($haveHash -ne $hash) { $drift += 'files' }
   if (-not ($sdks | Where-Object { $_ -like "$version *" })) { $drift += 'sdk-version' }
   @{ ok = ($drift.Count -eq 0); state = [ordered]@{
