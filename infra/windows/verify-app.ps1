@@ -45,9 +45,21 @@ function Invoke-Step([string] $Name, [scriptblock] $Body) {
   }
 }
 
-function Add-Check([string] $Name, [bool] $Pass, $Detail) {
-  [void]$Checks.Add([ordered]@{ check = $Name; pass = $Pass; detail = $Detail })
-  Write-Host ("    {0,-4} {1}" -f $(if ($Pass) { 'PASS' } else { 'FAIL' }), $Name)
+function Add-Check([string] $Name, [bool] $Pass, $Detail, [switch] $Soft) {
+  [void]$Checks.Add([ordered]@{ check = $Name; pass = $Pass; soft = [bool]$Soft; detail = $Detail })
+  $label = if ($Pass) { 'PASS' } elseif ($Soft) { 'INFO' } else { 'FAIL' }
+  Write-Host ("    {0,-4} {1}" -f $label, $Name)
+}
+
+function Invoke-HttpPost([string] $Url, [string] $Json) {
+  try {
+    $r = Invoke-WebRequest -Uri $Url -Method Post -Body ([Text.Encoding]::UTF8.GetBytes($Json)) -ContentType 'application/json; charset=utf-8' `
+      -UseBasicParsing -UseDefaultCredentials -TimeoutSec 900
+    @{ status = [int]$r.StatusCode; body = $r.Content }
+  } catch [System.Net.WebException] {
+    $resp = $_.Exception.Response
+    if ($resp) { @{ status = [int]$resp.StatusCode; body = '' } } else { @{ status = 0; body = $_.Exception.Message } }
+  }
 }
 
 # Run from the bundle root: dotnet reads global.json (test runner = Microsoft.Testing.Platform)
@@ -156,13 +168,56 @@ try {
     $p = Get-Process -Id $script:app.Id
     [ordered]@{ working_set_mb = [math]::Round($p.WorkingSet64 / 1MB, 1); private_mb = [math]::Round($p.PrivateMemorySize64 / 1MB, 1) }
   } | Out-Null
+
+  Invoke-Step 'agent-runs' {
+    $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    $base = "http://127.0.0.1:$([int]$cfg.Cortex.Local.Port)"
+    $runs = @()
+    $prompts = @(
+      'Please remember this for later: our support desk is open 08:00 to 16:00 CET, Monday to Friday.',
+      'When is our support desk open?')
+    foreach ($prompt in $prompts) {
+      $sw = [Diagnostics.Stopwatch]::StartNew()
+      $r = Invoke-HttpPost "$base/api/agents/assistant/runs" (@{ input = $prompt } | ConvertTo-Json -Compress)
+      $body = $null
+      if ($r.status -eq 200) { $body = $r.body | ConvertFrom-Json }
+      $runs += [ordered]@{ input = $prompt; status = $r.status; wall_seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1); body = $body; error = $(if ($r.status -ne 200) { $r.body }) }
+      Add-Check "agent run completes: '$($prompt.Substring(0, [Math]::Min(40, $prompt.Length)))...'" ($r.status -eq 200 -and $body.stop -eq 'Answered' -and "$($body.output)".Trim() -ne '') @{ status = $r.status; stop = $(if ($body) { $body.stop }) }
+      if ($body) {
+        $mt = $body.metrics
+        Write-Host ("         {0}s wall, model {1} ms, {2} in / {3} out tokens, {4} tok/s, recalled {5}, tools [{6}]" -f `
+          [math]::Round($sw.Elapsed.TotalSeconds, 1), $mt.modelMs, $mt.inputTokens, $mt.outputTokens, $mt.outputTokensPerSecond, $mt.recalledItems,
+          (@($body.toolCalls | ForEach-Object { "$($_.name):$($_.allowed)" }) -join ', '))
+        Write-Host ("         answer: {0}" -f ("$($body.output)" -replace '\s+', ' ').Substring(0, [Math]::Min(160, ("$($body.output)" -replace '\s+', ' ').Length)))
+      }
+    }
+
+    $second = $runs[1].body
+    $recalled = $second -and ("$($second.output)" -match '0?8[:.]00|8\s*(am|a\.m\.)') -and ("$($second.output)" -match '16[:.]00|4\s*(pm|p\.m\.)')
+    Add-Check 'second run answers from memory written by the first (model dependent)' $recalled @{ output = $(if ($second) { $second.output }) } -Soft
+
+    $mem = Invoke-Http "$base/api/memory/recent" -Windows
+    $m = $null
+    if ($mem.status -eq 200) { $m = $mem.body | ConvertFrom-Json }
+    $ids = @($runs | Where-Object { $_.body } | ForEach-Object { "$($_.body.runId)" })
+    $written = @($(if ($m) { $m.items }) | Where-Object { $ids -contains "$($_.runId)" -and $_.source -eq 'run' -and $_.trust -eq 'user' -and $_.contentBytes -gt 0 })
+    Add-Check 'memory written with provenance (run_id, source, trust), content encrypted' ($ids.Count -eq 2 -and $written.Count -eq 2) @{ items = $written }
+    Add-Check 'each run audited (agent.run) with an episode' ($m -and $m.agentRunAudits -ge 2 -and $m.episodes -ge 2) @{ audits = $(if ($m) { $m.agentRunAudits }); episodes = $(if ($m) { $m.episodes }) }
+
+    $ollama = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like 'C:\Program Files\Cortex\ollama\*' })
+    [ordered]@{
+      runs = @($runs | ForEach-Object { [ordered]@{ wall_seconds = $_.wall_seconds; status = $_.status; metrics = $(if ($_.body) { $_.body.metrics }); tool_calls = $(if ($_.body) { $_.body.toolCalls }); output = $(if ($_.body) { $_.body.output }) } })
+      ollama_working_set_mb = [math]::Round((($ollama | Measure-Object WorkingSet64 -Sum).Sum) / 1MB, 1)
+      app_working_set_mb = [math]::Round((Get-Process -Id $script:app.Id).WorkingSet64 / 1MB, 1)
+    }
+  } | Out-Null
 } catch { $failed = $_.Exception.Message }
 finally {
   if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -Force }
   Remove-Item env:ASPNETCORE_URLS -ErrorAction SilentlyContinue
 }
 
-$ok = ($null -eq $failed) -and -not @($Checks | Where-Object { -not $_.pass }).Count
+$ok = ($null -eq $failed) -and -not @($Checks | Where-Object { -not $_.pass -and -not $_.soft }).Count
 $summary = [ordered]@{
   run_id = $RunId; started = $Started.ToString('o'); finished = [DateTime]::UtcNow.ToString('o')
   minutes = [math]::Round(([DateTime]::UtcNow - $Started).TotalMinutes, 2)
