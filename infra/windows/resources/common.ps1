@@ -25,10 +25,12 @@ function Invoke-Native {
     [Parameter(Mandatory = $true)] [string] $File,
     [string[]] $Arguments = @(),
     [hashtable] $Environment = @{},
-    [string] $StdIn = ''
+    [string] $StdIn = '',
+    [string] $WorkingDirectory = ''
   )
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $File
+  if ($WorkingDirectory -ne '') { $psi.WorkingDirectory = $WorkingDirectory }
   $psi.Arguments = (@($Arguments | ForEach-Object { ConvertTo-ArgString $_ })) -join ' '
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true

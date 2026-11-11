@@ -50,8 +50,10 @@ function Add-Check([string] $Name, [bool] $Pass, $Detail) {
   Write-Host ("    {0,-4} {1}" -f $(if ($Pass) { 'PASS' } else { 'FAIL' }), $Name)
 }
 
+# Run from the bundle root: dotnet reads global.json (test runner = Microsoft.Testing.Platform)
+# from the working directory upward, and `dotnet test --project` only exists in that mode.
 function Invoke-Dotnet([string[]] $DotnetArgs, [string] $Log) {
-  $r = Invoke-Native $Dotnet $DotnetArgs $DotnetEnv
+  $r = Invoke-Native $Dotnet $DotnetArgs $DotnetEnv -WorkingDirectory $Bundle
   Save-Text $Log ($r.Out + "`n--- stderr ---`n" + $r.Err)
   $r
 }
@@ -100,6 +102,11 @@ try {
       $counts['exit'] = $r.Code
       $all[$p] = $counts
       Add-Check "tests $p (total $($counts.total), failed $($counts.failed), skipped $($counts.skipped))" ($r.Code -eq 0) $counts
+      if ($r.Code) {
+        # Show the cause on screen; the full output is in test-$p.log.
+        $lines = @(($r.Out + "`n" + $r.Err) -split "`r?`n" | Where-Object { $_ -match 'error|fail|exception|unrecognized|not found' } | Select-Object -First 6)
+        foreach ($l in $lines) { Write-Host "         $($l.Trim())" }
+      }
     }
     if (@($all.Values | Where-Object { $_.exit -ne 0 }).Count) { throw 'test failures; see test-*.log' }
     $all
