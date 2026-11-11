@@ -53,10 +53,12 @@ jobs:
         shell: pwsh
         run: |
           $bin = 'C:\pg\pgsql\bin'
-          & "$bin\initdb.exe" -D C:\pgdata -U postgres -A trust -E UTF8 --locale=C
+          # postgres drops admin rights at start, so data and log live under the runner temp dir.
+          $data = Join-Path $env:RUNNER_TEMP 'pgdata'; $log = Join-Path $env:RUNNER_TEMP 'pg.log'
+          & "$bin\initdb.exe" -D $data -U postgres -A trust -E UTF8 --locale=C
           if ($LASTEXITCODE) { throw 'initdb failed' }
-          & "$bin\pg_ctl.exe" -D C:\pgdata -l C:\pg.log -o "-p 5499" -w start
-          if ($LASTEXITCODE) { Get-Content C:\pg.log; throw 'start failed' }
+          & "$bin\pg_ctl.exe" -D $data -l $log -o "-p 5499" -w start
+          if ($LASTEXITCODE) { Get-Content $log -ErrorAction SilentlyContinue; throw 'start failed' }
           $sql = @(
             'CREATE EXTENSION vector',
             'CREATE TABLE t (e vector(3))',
@@ -70,7 +72,7 @@ jobs:
           if ($LASTEXITCODE) { throw 'smoke failed' }
           if (-not (Select-String -Path smoke.txt -Pattern 'Index Scan using' -Quiet)) { throw 'HNSW index not used' }
           if (-not (Select-String -Path smoke.txt -Pattern "^\s*$env:PGVECTOR_VERSION\s*$" -Quiet)) { throw 'wrong extension version' }
-          & "$bin\pg_ctl.exe" -D C:\pgdata -w stop
+          & "$bin\pg_ctl.exe" -D $data -w stop
 
       - name: Package
         id: pkg
