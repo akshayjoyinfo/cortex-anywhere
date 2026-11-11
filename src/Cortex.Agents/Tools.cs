@@ -5,7 +5,26 @@ namespace Cortex.Agents;
 /// <summary>An agent row as the runtime sees it. Tools is the agent's allow list.</summary>
 public sealed record AgentDefinition(
     Guid Id, string Name, string SystemPrompt, string Model,
-    IReadOnlyList<string> Tools, int MaxSteps, int TokenBudget);
+    IReadOnlyList<string> Tools, int MaxSteps, int TokenBudget)
+{
+    public IReadOnlyList<string> MemoryNamespaces { get; init; } = ["default"];
+}
+
+/// <summary>The agent and run the current scope is working for. Set once by the runtime.</summary>
+public sealed class AgentRunContext
+{
+    private AgentDefinition? _agent;
+
+    public AgentDefinition Agent => _agent ?? throw new InvalidOperationException("No agent run in this scope.");
+    public Guid RunId { get; private set; }
+
+    public void Begin(AgentDefinition agent, Guid runId)
+    {
+        if (_agent is not null) throw new InvalidOperationException("Agent run already started in this scope.");
+        _agent = agent;
+        RunId = runId;
+    }
+}
 
 /// <summary>
 /// Every tool registered in DI for the current scope. Tools are bound to the tenant

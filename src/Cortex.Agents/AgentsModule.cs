@@ -6,7 +6,7 @@ namespace Cortex.Agents;
 
 public static class AgentsModule
 {
-    /// <summary>Gateway validates its endpoint at startup. Tools and their registry are Scoped (tenant bound).</summary>
+    /// <summary>Gateway validates its endpoint at startup. Tools, registry and runtime are Scoped (tenant bound).</summary>
     public static IServiceCollection AddCortexAgents(this IServiceCollection services, IConfiguration configuration, CortexProfile profile)
     {
         var model = configuration.GetSection(ModelOptions.Section).Get<ModelOptions>() ?? new ModelOptions();
@@ -15,7 +15,11 @@ public static class AgentsModule
         services.AddSingleton(model);
         services.AddSingleton<ILlmGateway>(sp =>
             new OpenAiCompatibleGateway(model, profile, sp.GetRequiredService<ITenantContextAccessor>()));
+        services.AddSingleton<IOutputPolicy, BasicOutputPolicy>();
+        services.AddScoped<AgentRunContext>();
+        services.AddScoped<ITenantBoundTool, SearchMemoryTool>();
         services.AddScoped<ToolRegistry>();
+        services.AddScoped<IAgentRuntime, AgentRuntime>();
         return services;
     }
 }
