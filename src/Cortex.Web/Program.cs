@@ -35,6 +35,7 @@ if (profile == CortexProfile.Local)
 
     builder.Services.AddSingleton(install);
     builder.Services.AddSingleton<ISecretStore>(secrets);
+    builder.Services.AddSingleton<IContentProtector>(AesGcmContentProtector.FromSecret(secrets, install.MemoryKeySecret));
 
     // Everything binds to loopback. ASPNETCORE_URLS and appsettings cannot widen it.
     builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, install.Port));
@@ -44,6 +45,7 @@ else
     connectionString = builder.Configuration.GetConnectionString("Cortex")
         ?? throw new InvalidOperationException("ConnectionStrings:Cortex is not set.");
     builder.Services.AddSingleton<ISecretStore, OpenBaoSecretStore>();
+    builder.Services.AddSingleton<IContentProtector, TransitContentProtector>();
 }
 
 builder.AddServiceDefaults();
@@ -102,9 +104,40 @@ if (role == "web")
         return Results.Ok(new { visibleTenants = names.Count, name = names.FirstOrDefault() });
     }).RequireAuthorization();
 
+    // One agent run, synchronous (local profile). Server profile will enqueue a signed job instead.
+    app.MapPost("/api/agents/{name}/runs", async (string name, RunInput body, IAgentCatalog catalog, IAgentRuntime runtime, CancellationToken ct) =>
+    {
+        if (string.IsNullOrWhiteSpace(body.Input) || body.Input.Length > 4000)
+            return Results.BadRequest(new { error = "input must be 1 to 4000 characters" });
+        var agent = await catalog.FindByNameAsync(name, ct);
+        if (agent is null) return Results.NotFound();
+        var runId = Guid.NewGuid();
+        var result = await runtime.RunAsync(new AgentRunRequest(agent.Id, runId, body.Input), ct);
+        return Results.Ok(new
+        {
+            runId, output = result.Output, steps = result.Steps, stop = result.StopReason.ToString(),
+            toolCalls = result.ToolCalls, metrics = result.Metrics,
+        });
+    }).RequireAuthorization();
+
+    // Provenance only, never content: what was written, by which run, from which source, at which trust.
+    app.MapGet("/api/memory/recent", async (CortexDbContext db, CancellationToken ct) =>
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var items = await db.MemoryItems.AsNoTracking().OrderByDescending(m => m.CreatedAt).Take(20)
+            .Select(m => new { m.Id, m.Namespace, m.Source, m.Trust, m.RunId, m.AgentId, m.CreatedAt, contentBytes = m.Content.Length })
+            .ToListAsync(ct);
+        var episodes = await db.MemoryEpisodes.AsNoTracking().CountAsync(ct);
+        var audits = await db.AuditEvents.AsNoTracking().CountAsync(a => a.Kind == "agent.run", ct);
+        await tx.CommitAsync(ct);
+        return Results.Ok(new { items, episodes, agentRunAudits = audits });
+    }).RequireAuthorization();
+
     // MCP endpoint for n8n and AI assistants: tenant from the OAuth token only. Stub.
     app.MapPost("/mcp", () => Results.StatusCode(StatusCodes.Status501NotImplemented))
        .RequireAuthorization();
 }
 
 app.Run();
+
+internal sealed record RunInput(string Input);

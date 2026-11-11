@@ -29,6 +29,7 @@ services:
       ConnectionStrings__Cortex: Host=10.10.1.20;Port=6432;Database=cortex;Username=cortex_app
       Cortex__Model__Endpoint: http://10.10.2.10:8000/v1
       Cortex__Model__Name: qwen3-14b
+      Cortex__Model__EmbeddingName: qwen3-embedding-0.6b
       Vault__Address: http://10.10.1.20:8200
       Vault__RoleIdFile: /run/secrets/web_role_id
     labels: [traefik.enable=true, "traefik.http.routers.web.rule=Host(`app.cortex.example`)", traefik.http.routers.web.tls.certresolver=le]
@@ -42,6 +43,7 @@ services:
       ConnectionStrings__Cortex: Host=10.10.1.20;Port=6432;Database=cortex;Username=cortex_app
       Cortex__Model__Endpoint: http://10.10.2.10:8000/v1
       Cortex__Model__Name: qwen3-14b
+      Cortex__Model__EmbeddingName: qwen3-embedding-0.6b
       HTTPS_PROXY: http://smokescreen:4750
     networks: [worker]
 
