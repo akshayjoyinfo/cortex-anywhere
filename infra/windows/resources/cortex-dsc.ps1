@@ -11,7 +11,7 @@ Every resource is idempotent: set reads state first and changes only what drifte
 #>
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('VcRuntime', 'Postgres', 'PgExtension', 'Database', 'DbChecks')]
+  [ValidateSet('VcRuntime', 'Postgres', 'PgExtension', 'Database', 'DbChecks', 'DotnetSdk', 'LocalInstall')]
   [string] $Resource,
   [Parameter(Mandatory = $true)]
   [ValidateSet('get', 'test', 'set')]
@@ -506,6 +506,120 @@ function Get-DbChecksState($d) {
 function Set-DbChecks($d, $s) {
   # Nothing to converge: a failing invariant is a defect, never auto-fixed.
   throw "database checks failed: $(@($s.state.failed) -join ', ')"
+}
+
+# ------------------------------------------------------------------ DotnetSdk
+# Pinned SDK in its own folder, never on PATH and never shared with other software.
+
+function Get-DotnetSdkState($d) {
+  $dir = Need $d 'installDir'; $version = Need $d 'version'; $hash = (Need $d 'sha512').ToLowerInvariant()
+  $drift = @()
+  $marker = Join-Path $dir '.cortex-artifact.json'
+  $haveHash = $null
+  if (Test-Path $marker) { $haveHash = (Get-Content $marker -Raw | ConvertFrom-Json).sha512 }
+  $sdks = @()
+  $exe = Join-Path $dir 'dotnet.exe'
+  if (Test-Path $exe) { $sdks = Get-Lines (Invoke-Native $exe @('--list-sdks')).Out }
+  if ($haveHash -ne $hash) { $drift += 'files' }
+  if (-not ($sdks | Where-Object { $_ -like "$version *" })) { $drift += 'sdk-version' }
+  @{ ok = ($drift.Count -eq 0); state = [ordered]@{
+      version = $version; url = (Need $d 'url'); sha512 = $hash; installDir = $dir; installedSdks = $sdks; drift = $drift } }
+}
+
+function Set-DotnetSdk($d, $s) {
+  $dir = Need $d 'installDir'; $version = Need $d 'version'
+  $zip = Get-PinnedFile (Need $d 'url') (Need $d 'sha512') "dotnet-sdk-$version-win-x64.zip" $CacheDir
+  Write-Step 'verified' @{ file = $zip }
+  Expand-ZipSubset $zip $dir '' @('')
+  $marker = [ordered]@{ url = (Need $d 'url'); sha512 = (Need $d 'sha512').ToLowerInvariant(); version = $version; run_id = $RunId }
+  [IO.File]::WriteAllText((Join-Path $dir '.cortex-artifact.json'), ($marker | ConvertTo-Json), $Utf8)
+}
+
+# ------------------------------------------------------------------ LocalInstall
+# The local profile's identity: one customer, one fixed tenant, the app role's password
+# (DPAPI) and the install config the app reads (no secrets in it).
+
+function Get-JsonPath($Obj, [string] $Path) {
+  $cur = $Obj
+  foreach ($part in $Path -split '\.') {
+    if ($null -eq $cur -or -not $cur.PSObject.Properties[$part]) { return $null }
+    $cur = $cur.PSObject.Properties[$part].Value
+  }
+  $cur
+}
+
+function Get-InstallConfigText($d, [string] $CustomerId, [string] $TenantId) {
+  $cfg = [ordered]@{
+    Cortex = [ordered]@{
+      Local = [ordered]@{ TenantId = $TenantId; TenantName = (Need $d 'tenantName'); Port = [int](Need $d 'httpPort'); SecretsDirectory = $SecretDir }
+      Database = [ordered]@{ Host = '127.0.0.1'; Port = [int](Need $d 'port'); Database = (Need $d 'database'); Username = (Need $d 'appRole'); PasswordSecret = (Need $d 'appSecret') }
+      Model = [ordered]@{ Endpoint = (Need $d 'modelEndpoint'); Name = (Need $d 'modelName') }
+    }
+    Install = [ordered]@{ CustomerId = $CustomerId; CustomerName = (Need $d 'customerName') }
+  }
+  ($cfg | ConvertTo-Json -Depth 6) + "`n"
+}
+
+function Test-AppLogin($d) {
+  $app = Assert-Ident (Need $d 'appRole') 'appRole'
+  $db = Assert-Ident (Need $d 'database') 'database'
+  if (-not (Test-Path (Get-SecretPath (Need $d 'appSecret')))) { return $false }
+  $a = @('-X', '-q', '-tA', '-h', '127.0.0.1', '-p', "$(Need $d 'port')", '-U', $app, '-d', $db, '-c', 'SELECT current_user')
+  $r = Invoke-Native (Join-Path (Need $d 'pgInstallDir') 'bin\psql.exe') $a @{ PGPASSWORD = (Unprotect-Secret (Need $d 'appSecret')); PGCONNECT_TIMEOUT = '10' }
+  $r.Code -eq 0 -and $r.Out.Trim() -eq $app
+}
+
+function Get-LocalInstallState($d) {
+  $path = Need $d 'configPath'
+  $db = Assert-Ident (Need $d 'database') 'database'
+  $cfg = $null
+  if (Test-Path $path) { $cfg = Get-Content $path -Raw | ConvertFrom-Json }
+  $tenantId = Get-JsonPath $cfg 'Cortex.Local.TenantId'
+  $customerId = Get-JsonPath $cfg 'Install.CustomerId'
+  $drift = @()
+  if (-not $tenantId -or -not $customerId) { $drift += 'ids' }
+  elseif ([IO.File]::ReadAllText($path) -ne (Get-InstallConfigText $d $customerId $tenantId)) { $drift += 'config' }
+  if (-not (Test-Path (Get-SecretPath (Need $d 'appSecret')))) { $drift += 'secret' }
+  $login = Test-AppLogin $d
+  if (-not $login) { $drift += 'app-login' }
+  $row = $false
+  if ($tenantId -and $tenantId -match '^[0-9a-fA-F-]{36}$') {
+    $row = (Invoke-Psql $d $db @('-c', "SELECT count(*) FROM cortex.tenants WHERE id = '$tenantId'")).Out.Trim() -eq '1'
+  }
+  if (-not $row) { $drift += 'tenant-row' }
+  @{ ok = ($drift.Count -eq 0); customerId = $customerId; tenantId = $tenantId; state = [ordered]@{
+      configPath = $path; customerName = (Need $d 'customerName'); tenantName = (Need $d 'tenantName')
+      database = $db; appRole = (Need $d 'appRole'); appSecret = (Need $d 'appSecret')
+      pgInstallDir = (Need $d 'pgInstallDir'); port = [int](Need $d 'port'); httpPort = [int](Need $d 'httpPort')
+      modelEndpoint = (Need $d 'modelEndpoint'); modelName = (Need $d 'modelName')
+      tenantId = $tenantId; appLogin = $login; tenantRow = $row; drift = $drift } }
+}
+
+function Set-LocalInstall($d, $s) {
+  $db = Assert-Ident (Need $d 'database') 'database'
+  $app = Assert-Ident (Need $d 'appRole') 'appRole'
+  $secret = Need $d 'appSecret'
+  $tenantId = if ($s.tenantId) { $s.tenantId } else { [guid]::NewGuid().ToString() }
+  $customerId = if ($s.customerId) { $s.customerId } else { [guid]::NewGuid().ToString() }
+
+  if (-not (Test-Path (Get-SecretPath $secret))) { Protect-Secret $secret (New-RandomSecret) }
+  if (-not (Test-AppLogin $d)) {
+    # Password travels on stdin only (never argv); base64url has no quote characters.
+    Invoke-Psql $d 'postgres' -StdIn "ALTER ROLE $app WITH LOGIN PASSWORD '$(Unprotect-Secret $secret)';`n" | Out-Null
+    Write-Step 'app-password-set' @{ role = $app; secret = $secret }
+  }
+
+  $sql = "INSERT INTO cortex.customers (id, legal_name) VALUES ('$customerId', :'customer') ON CONFLICT (id) DO NOTHING;`n" +
+         "INSERT INTO cortex.tenants (id, customer_id, name, tier) VALUES ('$tenantId', '$customerId', :'tenant', 'silo') ON CONFLICT (id) DO NOTHING;`n"
+  Invoke-Psql $d $db -StdIn $sql -Vars @{ customer = (Need $d 'customerName'); tenant = (Need $d 'tenantName') } | Out-Null
+  Write-Step 'tenant-row' @{ tenant_id = $tenantId; customer_id = $customerId }
+
+  $path = Need $d 'configPath'
+  $dir = Split-Path $path
+  if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+  Set-RestrictedAcl $dir @()
+  [IO.File]::WriteAllText($path, (Get-InstallConfigText $d $customerId $tenantId), $Utf8)
+  Write-Step 'config-written' @{ path = $path }
 }
 
 # ------------------------------------------------------------------ main

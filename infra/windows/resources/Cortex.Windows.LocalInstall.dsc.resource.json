@@ -1,0 +1,151 @@
+{
+  "$schema": "https://aka.ms/dsc/schemas/v3/bundled/resource/manifest.json",
+  "type": "Cortex.Windows/LocalInstall",
+  "version": "0.1.0",
+  "description": "Local profile identity: fixed tenant, app role password (DPAPI) and install config.",
+  "tags": [
+    "cortex",
+    "windows"
+  ],
+  "get": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "LocalInstall",
+      "-Operation",
+      "get"
+    ],
+    "input": "stdin"
+  },
+  "test": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "LocalInstall",
+      "-Operation",
+      "test"
+    ],
+    "input": "stdin",
+    "return": "state"
+  },
+  "set": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "LocalInstall",
+      "-Operation",
+      "set"
+    ],
+    "input": "stdin",
+    "implementsPretest": true,
+    "return": "state"
+  },
+  "exitCodes": {
+    "0": "Success",
+    "1": "Error, see stderr and steps.jsonl"
+  },
+  "schema": {
+    "embedded": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "configPath",
+        "customerName",
+        "tenantName",
+        "database",
+        "appRole",
+        "appSecret",
+        "pgInstallDir",
+        "port",
+        "httpPort",
+        "modelEndpoint",
+        "modelName"
+      ],
+      "properties": {
+        "configPath": {
+          "type": "string"
+        },
+        "customerName": {
+          "type": "string"
+        },
+        "tenantName": {
+          "type": "string"
+        },
+        "database": {
+          "type": "string"
+        },
+        "appRole": {
+          "type": "string"
+        },
+        "appSecret": {
+          "type": "string"
+        },
+        "pgInstallDir": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "httpPort": {
+          "type": "integer"
+        },
+        "modelEndpoint": {
+          "type": "string"
+        },
+        "modelName": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "appLogin": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "tenantRow": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "readOnly": true
+        },
+        "_inDesiredState": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "readOnly": true
+        }
+      }
+    }
+  }
+}
