@@ -11,5 +11,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cortex.Core\Cortex.Core.csproj" />
+    <ProjectReference Include="..\..\src\Cortex.Agents\Cortex.Agents.csproj" />
+    <ProjectReference Include="..\..\src\Cortex.Data\Cortex.Data.csproj" />
   </ItemGroup>
 </Project>
