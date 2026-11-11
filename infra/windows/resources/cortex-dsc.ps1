@@ -11,7 +11,7 @@ Every resource is idempotent: set reads state first and changes only what drifte
 #>
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('VcRuntime', 'Postgres', 'PgExtension', 'Database', 'DbChecks', 'DotnetSdk', 'LocalInstall')]
+  [ValidateSet('VcRuntime', 'Postgres', 'PgExtension', 'Database', 'DbChecks', 'DotnetSdk', 'LocalInstall', 'Ollama', 'OllamaModel')]
   [string] $Resource,
   [Parameter(Mandatory = $true)]
   [ValidateSet('get', 'test', 'set')]
@@ -102,7 +102,7 @@ function New-RandomSecret {
 }
 
 # Extract only the listed top level folders; entry names normalised to forward slashes.
-function Expand-ZipSubset([string] $Zip, [string] $Dest, [string] $StripPrefix, [string[]] $Include) {
+function Expand-ZipSubset([string] $Zip, [string] $Dest, [string] $StripPrefix, [string[]] $Include, [string[]] $Exclude = @()) {
   $z = [IO.Compression.ZipFile]::OpenRead($Zip)
   $count = 0
   try {
@@ -113,6 +113,7 @@ function Expand-ZipSubset([string] $Zip, [string] $Dest, [string] $StripPrefix, 
       if ($rel -match '(^|/)\.\.(/|$)') { throw "unsafe zip entry $n" }
       # Count matches: an include prefix of '' (everything) is itself falsy in PowerShell.
       if (@($Include | Where-Object { $rel.StartsWith($_) }).Count -eq 0) { continue }
+      if (@($Exclude | Where-Object { $_ -ne '' -and $rel.StartsWith($_) }).Count -gt 0) { continue }
       $target = Join-Path $Dest ($rel -replace '/', '\')
       if ($n.EndsWith('/')) { New-Item -ItemType Directory -Force $target | Out-Null; continue }
       New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
@@ -537,6 +538,137 @@ function Set-DotnetSdk($d, $s) {
   [IO.File]::WriteAllText((Join-Path $dir '.cortex-artifact.json'), ($marker | ConvertTo-Json), $Utf8)
 }
 
+# ------------------------------------------------------------------ Ollama
+# CPU build only (CUDA, ROCm and Vulkan libraries are not unpacked), loopback only,
+# started at boot by a scheduled task running as NetworkService.
+
+function Get-OllamaPort([string] $HostPort) {
+  if ($HostPort -notmatch '^(127\.0\.0\.1|localhost):(\d{2,5})$') { throw "Ollama host must be loopback host:port, got '$HostPort'" }
+  [int]$Matches[2]
+}
+
+function Get-OllamaVersion([string] $HostPort) {
+  try { (Invoke-RestMethod -Uri "http://$HostPort/api/version" -TimeoutSec 5 -UseBasicParsing).version } catch { $null }
+}
+
+function Get-OllamaRunner($d) {
+  $dir = Need $d 'installDir'
+  "@echo off`r`n" +
+  "rem Managed by Cortex provisioning (ADR 014). Local edits are overwritten.`r`n" +
+  "set OLLAMA_HOST=$(Need $d 'host')`r`n" +
+  "set OLLAMA_MODELS=$(Need $d 'modelsDir')`r`n" +
+  "set OLLAMA_KEEP_ALIVE=30m`r`n" +
+  "set OLLAMA_NUM_PARALLEL=1`r`n" +
+  "set OLLAMA_MAX_LOADED_MODELS=2`r`n" +
+  "`"$dir\ollama.exe`" serve >> `"$(Need $d 'logDir')\serve.log`" 2>&1`r`n"
+}
+
+function Stop-CortexOllama($d) {
+  $dir = (Need $d 'installDir').ToLowerInvariant()
+  try { Stop-ScheduledTask -TaskName (Need $d 'taskName') -ErrorAction SilentlyContinue } catch { }
+  foreach ($p in @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.ToLowerInvariant().StartsWith($dir) })) {
+    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+    Write-Step 'process-stopped' @{ name = $p.ProcessName; pid = $p.Id }
+  }
+}
+
+function Get-OllamaState($d) {
+  $dir = Need $d 'installDir'; $version = Need $d 'version'; $sha = (Need $d 'sha256').ToLowerInvariant()
+  $hp = Need $d 'host'; $port = Get-OllamaPort $hp; $task = Need $d 'taskName'
+  $drift = @()
+  $marker = Join-Path $dir '.cortex-artifact.json'
+  $haveSha = $null
+  if (Test-Path $marker) { $haveSha = (Get-Content $marker -Raw | ConvertFrom-Json).sha256 }
+  if ($haveSha -ne $sha) { $drift += 'binaries' }
+  $runner = Join-Path $dir 'cortex-ollama.cmd'
+  if (-not (Test-Path $runner) -or [IO.File]::ReadAllText($runner) -ne (Get-OllamaRunner $d)) { $drift += 'runner' }
+  $t = Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+  $taskState = $null
+  if ($t) { $taskState = "$($t.State)" } else { $drift += 'task' }
+  $serving = Get-OllamaVersion $hp
+  if ($serving -ne $version) { $drift += 'not-serving' }
+  $listening = @(Get-Listeners $port)
+  if (@($listening | Where-Object { $_ -notin '127.0.0.1', '::1' }).Count) { $drift += 'exposed' }
+  @{ ok = ($drift.Count -eq 0); state = [ordered]@{
+      version = $version; url = (Need $d 'url'); sha256 = $sha; installDir = $dir; modelsDir = (Need $d 'modelsDir')
+      logDir = (Need $d 'logDir'); host = $hp; taskName = $task
+      servingVersion = $serving; taskState = $taskState; listeningOn = $listening; drift = $drift } }
+}
+
+function Set-Ollama($d, $s) {
+  $dir = Need $d 'installDir'; $version = Need $d 'version'; $task = Need $d 'taskName'; $hp = Need $d 'host'
+  $drift = @($s.state.drift)
+  $restart = $false
+  if ($drift -contains 'binaries') {
+    Stop-CortexOllama $d
+    $zip = Get-PinnedFile (Need $d 'url') (Need $d 'sha256') "ollama-$version-windows-amd64.zip" $CacheDir
+    Write-Step 'verified' @{ file = $zip }
+    Expand-ZipSubset $zip $dir '' @('ollama.exe', 'lib/ollama/') @('lib/ollama/cuda_v12/', 'lib/ollama/cuda_v13/', 'lib/ollama/vulkan/', 'lib/ollama/rocm/')
+    $marker = [ordered]@{ url = (Need $d 'url'); sha256 = (Need $d 'sha256').ToLowerInvariant(); version = $version; run_id = $RunId }
+    [IO.File]::WriteAllText((Join-Path $dir '.cortex-artifact.json'), ($marker | ConvertTo-Json), $Utf8)
+    $restart = $true
+  }
+  foreach ($p in (Need $d 'modelsDir'), (Need $d 'logDir')) {
+    if (-not (Test-Path $p)) { New-Item -ItemType Directory -Force $p | Out-Null }
+    Set-RestrictedAcl $p @('*S-1-5-20')   # NetworkService runs Ollama
+  }
+  $runner = Join-Path $dir 'cortex-ollama.cmd'
+  $text = Get-OllamaRunner $d
+  if (-not (Test-Path $runner) -or [IO.File]::ReadAllText($runner) -ne $text) {
+    [IO.File]::WriteAllText($runner, $text, (New-Object System.Text.ASCIIEncoding)); $restart = $true
+    Write-Step 'runner-written' @{ path = $runner }
+  }
+  $action = New-ScheduledTaskAction -Execute $runner
+  $trigger = New-ScheduledTaskTrigger -AtStartup
+  $principal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\NETWORK SERVICE' -LogonType ServiceAccount -RunLevel Limited
+  $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+  Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+  Write-Step 'task-registered' @{ task = $task; account = 'NetworkService'; trigger = 'AtStartup' }
+
+  if ($restart -or (Get-OllamaVersion $hp) -ne $version) {
+    Stop-CortexOllama $d
+    Start-ScheduledTask -TaskName $task
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ((Get-OllamaVersion $hp) -ne $version) {
+      if ($sw.Elapsed.TotalSeconds -gt 60) { throw "Ollama did not answer on $hp within 60s; see $(Need $d 'logDir')\serve.log" }
+      Start-Sleep -Seconds 1
+    }
+    Write-Step 'serving' @{ host = $hp; seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+  }
+}
+
+# ------------------------------------------------------------------ OllamaModel
+# A model is pinned by its manifest digest. The registry only serves tags, so the pull
+# is verified after the fact: a different digest fails the run.
+
+function Get-OllamaModelState($d) {
+  $name = Need $d 'name'; $digest = (Need $d 'digest').ToLowerInvariant(); $hp = Need $d 'host'
+  [void](Get-OllamaPort $hp)
+  $have = $null; $size = $null
+  try {
+    $tags = Invoke-RestMethod -Uri "http://$hp/api/tags" -TimeoutSec 10 -UseBasicParsing
+    $m = @($tags.models | Where-Object { $_.name -eq $name }) | Select-Object -First 1
+    if ($m) { $have = $m.digest; $size = $m.size }
+  } catch { }
+  $drift = @()
+  if (-not $have) { $drift += 'not-pulled' } elseif ($have -ne $digest) { $drift += 'digest' }
+  @{ ok = ($drift.Count -eq 0); state = [ordered]@{
+      name = $name; digest = $digest; host = $hp; installedDigest = $have; sizeBytes = $size; drift = $drift } }
+}
+
+function Set-OllamaModel($d, $s) {
+  $name = Need $d 'name'; $hp = Need $d 'host'
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  $body = @{ model = $name; stream = $false } | ConvertTo-Json -Compress
+  $r = Invoke-RestMethod -Method Post -Uri "http://$hp/api/pull" -Body $body -ContentType 'application/json' -TimeoutSec 3600 -UseBasicParsing
+  Write-Step 'pulled' @{ name = $name; status = "$($r.status)"; seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+  $after = Get-OllamaModelState $d
+  if ($after.state.installedDigest -and $after.state.installedDigest -ne $after.state.digest) {
+    throw "registry served $name with digest $($after.state.installedDigest), pinned $($after.state.digest). Not accepted."
+  }
+}
+
 # ------------------------------------------------------------------ LocalInstall
 # The local profile's identity: one customer, one fixed tenant, the app role's password
 # (DPAPI) and the install config the app reads (no secrets in it).
@@ -553,9 +685,9 @@ function Get-JsonPath($Obj, [string] $Path) {
 function Get-InstallConfigText($d, [string] $CustomerId, [string] $TenantId) {
   $cfg = [ordered]@{
     Cortex = [ordered]@{
-      Local = [ordered]@{ TenantId = $TenantId; TenantName = (Need $d 'tenantName'); Port = [int](Need $d 'httpPort'); SecretsDirectory = $SecretDir }
+      Local = [ordered]@{ TenantId = $TenantId; TenantName = (Need $d 'tenantName'); Port = [int](Need $d 'httpPort'); SecretsDirectory = $SecretDir; MemoryKeySecret = (Need $d 'memoryKeySecret') }
       Database = [ordered]@{ Host = '127.0.0.1'; Port = [int](Need $d 'port'); Database = (Need $d 'database'); Username = (Need $d 'appRole'); PasswordSecret = (Need $d 'appSecret') }
-      Model = [ordered]@{ Endpoint = (Need $d 'modelEndpoint'); Name = (Need $d 'modelName') }
+      Model = [ordered]@{ Endpoint = (Need $d 'modelEndpoint'); Name = (Need $d 'modelName'); EmbeddingName = (Need $d 'embeddingModelName') }
     }
     Install = [ordered]@{ CustomerId = $CustomerId; CustomerName = (Need $d 'customerName') }
   }
@@ -569,6 +701,11 @@ function Test-AppLogin($d) {
   $a = @('-X', '-q', '-tA', '-h', '127.0.0.1', '-p', "$(Need $d 'port')", '-U', $app, '-d', $db, '-c', 'SELECT current_user')
   $r = Invoke-Native (Join-Path (Need $d 'pgInstallDir') 'bin\psql.exe') $a @{ PGPASSWORD = (Unprotect-Secret (Need $d 'appSecret')); PGCONNECT_TIMEOUT = '10' }
   $r.Code -eq 0 -and $r.Out.Trim() -eq $app
+}
+
+function Get-AgentVars($d) {
+  $tools = @(Need $d 'agentTools' | ForEach-Object { Assert-Ident $_ 'tool' })
+  @{ n = (Need $d 'agentName'); p = (Need $d 'agentPrompt'); m = (Need $d 'modelName'); t = ($tools -join ',') }
 }
 
 function Get-LocalInstallState($d) {
@@ -589,12 +726,23 @@ function Get-LocalInstallState($d) {
     $row = (Invoke-Psql $d $db @('-c', "SELECT count(*) FROM cortex.tenants WHERE id = '$tenantId'")).Out.Trim() -eq '1'
   }
   if (-not $row) { $drift += 'tenant-row' }
+  if (-not (Test-Path (Get-SecretPath (Need $d 'memoryKeySecret')))) { $drift += 'memory-key' }
+  $agentOk = $false
+  if ($row) {
+    $r = Invoke-Psql $d $db -StdIn (
+      "SELECT count(*) FILTER (WHERE system_prompt = :'p' AND model = :'m' AND tools = string_to_array(:'t', ',')) " +
+      "FROM cortex.agents WHERE tenant_id = '$tenantId' AND name = :'n';`n") -Vars (Get-AgentVars $d)
+    $agentOk = $r.Out.Trim() -eq '1'
+  }
+  if (-not $agentOk) { $drift += 'agent' }
   @{ ok = ($drift.Count -eq 0); customerId = $customerId; tenantId = $tenantId; state = [ordered]@{
       configPath = $path; customerName = (Need $d 'customerName'); tenantName = (Need $d 'tenantName')
       database = $db; appRole = (Need $d 'appRole'); appSecret = (Need $d 'appSecret')
       pgInstallDir = (Need $d 'pgInstallDir'); port = [int](Need $d 'port'); httpPort = [int](Need $d 'httpPort')
       modelEndpoint = (Need $d 'modelEndpoint'); modelName = (Need $d 'modelName')
-      tenantId = $tenantId; appLogin = $login; tenantRow = $row; drift = $drift } }
+      embeddingModelName = (Need $d 'embeddingModelName'); memoryKeySecret = (Need $d 'memoryKeySecret')
+      agentName = (Need $d 'agentName'); agentPrompt = (Need $d 'agentPrompt'); agentTools = @(Need $d 'agentTools')
+      tenantId = $tenantId; appLogin = $login; tenantRow = $row; agentSeeded = $agentOk; drift = $drift } }
 }
 
 function Set-LocalInstall($d, $s) {
@@ -615,6 +763,17 @@ function Set-LocalInstall($d, $s) {
          "INSERT INTO cortex.tenants (id, customer_id, name, tier) VALUES ('$tenantId', '$customerId', :'tenant', 'silo') ON CONFLICT (id) DO NOTHING;`n"
   Invoke-Psql $d $db -StdIn $sql -Vars @{ customer = (Need $d 'customerName'); tenant = (Need $d 'tenantName') } | Out-Null
   Write-Step 'tenant-row' @{ tenant_id = $tenantId; customer_id = $customerId }
+
+  # Memory content key (AES-256), DPAPI protected like every other local secret.
+  if (-not (Test-Path (Get-SecretPath (Need $d 'memoryKeySecret')))) { Protect-Secret (Need $d 'memoryKeySecret') (New-RandomSecret) }
+
+  # The agent is desired state too: prompt, model and allow list converge on every run.
+  $agentSql = "UPDATE cortex.agents SET system_prompt = :'p', model = :'m', tools = string_to_array(:'t', ',') WHERE tenant_id = '$tenantId' AND name = :'n';`n" +
+              "INSERT INTO cortex.agents (tenant_id, name, system_prompt, model, tools, max_steps, token_budget) " +
+              "SELECT '$tenantId', :'n', :'p', :'m', string_to_array(:'t', ','), 4, 8000 " +
+              "WHERE NOT EXISTS (SELECT 1 FROM cortex.agents WHERE tenant_id = '$tenantId' AND name = :'n');`n"
+  Invoke-Psql $d $db -StdIn $agentSql -Vars (Get-AgentVars $d) | Out-Null
+  Write-Step 'agent' @{ name = (Need $d 'agentName'); tools = @(Need $d 'agentTools') }
 
   $path = Need $d 'configPath'
   $dir = Split-Path $path

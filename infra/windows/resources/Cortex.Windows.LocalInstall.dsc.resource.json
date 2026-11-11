@@ -80,7 +80,12 @@
         "port",
         "httpPort",
         "modelEndpoint",
-        "modelName"
+        "modelName",
+        "embeddingModelName",
+        "memoryKeySecret",
+        "agentName",
+        "agentPrompt",
+        "agentTools"
       ],
       "properties": {
         "configPath": {
@@ -116,6 +121,24 @@
         "modelName": {
           "type": "string"
         },
+        "embeddingModelName": {
+          "type": "string"
+        },
+        "memoryKeySecret": {
+          "type": "string"
+        },
+        "agentName": {
+          "type": "string"
+        },
+        "agentPrompt": {
+          "type": "string"
+        },
+        "agentTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "tenantId": {
           "type": [
             "string",
@@ -128,6 +151,10 @@
           "readOnly": true
         },
         "tenantRow": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "agentSeeded": {
           "type": "boolean",
           "readOnly": true
         },

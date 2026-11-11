@@ -1,0 +1,143 @@
+{
+  "$schema": "https://aka.ms/dsc/schemas/v3/bundled/resource/manifest.json",
+  "type": "Cortex.Windows/Ollama",
+  "version": "0.1.0",
+  "description": "Pinned Ollama CPU build, loopback only, started at boot as NetworkService.",
+  "tags": [
+    "cortex",
+    "windows"
+  ],
+  "get": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "Ollama",
+      "-Operation",
+      "get"
+    ],
+    "input": "stdin"
+  },
+  "test": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "Ollama",
+      "-Operation",
+      "test"
+    ],
+    "input": "stdin",
+    "return": "state"
+  },
+  "set": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "Ollama",
+      "-Operation",
+      "set"
+    ],
+    "input": "stdin",
+    "implementsPretest": true,
+    "return": "state"
+  },
+  "exitCodes": {
+    "0": "Success",
+    "1": "Error, see stderr and steps.jsonl"
+  },
+  "schema": {
+    "embedded": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "version",
+        "url",
+        "sha256",
+        "installDir",
+        "modelsDir",
+        "logDir",
+        "host",
+        "taskName"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$|^PENDING$"
+        },
+        "installDir": {
+          "type": "string"
+        },
+        "modelsDir": {
+          "type": "string"
+        },
+        "logDir": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "taskName": {
+          "type": "string"
+        },
+        "servingVersion": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "taskState": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "listeningOn": {
+          "type": "array",
+          "readOnly": true
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "readOnly": true
+        },
+        "_inDesiredState": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "readOnly": true
+        }
+      }
+    }
+  }
+}

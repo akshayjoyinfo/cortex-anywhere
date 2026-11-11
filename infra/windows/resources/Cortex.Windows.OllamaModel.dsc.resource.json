@@ -1,0 +1,119 @@
+{
+  "$schema": "https://aka.ms/dsc/schemas/v3/bundled/resource/manifest.json",
+  "type": "Cortex.Windows/OllamaModel",
+  "version": "0.1.0",
+  "description": "A model pulled into Ollama and verified against its pinned manifest digest.",
+  "tags": [
+    "cortex",
+    "windows"
+  ],
+  "get": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "OllamaModel",
+      "-Operation",
+      "get"
+    ],
+    "input": "stdin"
+  },
+  "test": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "OllamaModel",
+      "-Operation",
+      "test"
+    ],
+    "input": "stdin",
+    "return": "state"
+  },
+  "set": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "OllamaModel",
+      "-Operation",
+      "set"
+    ],
+    "input": "stdin",
+    "implementsPretest": true,
+    "return": "state"
+  },
+  "exitCodes": {
+    "0": "Success",
+    "1": "Error, see stderr and steps.jsonl"
+  },
+  "schema": {
+    "embedded": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "name",
+        "digest",
+        "host"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "host": {
+          "type": "string"
+        },
+        "installedDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "readOnly": true
+        },
+        "_inDesiredState": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "readOnly": true
+        }
+      }
+    }
+  }
+}
