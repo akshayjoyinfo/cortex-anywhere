@@ -1,0 +1,3 @@
+collections:
+  - name: ansible.windows
+    version: ">=3.9.0,<4.0.0"   # dsc3 module with executable and resource_path

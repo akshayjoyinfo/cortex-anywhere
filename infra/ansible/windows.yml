@@ -1,0 +1,41 @@
+# Cortex Windows hosts we operate (ADR 014). Same DSC document as customer installs.
+# Hosts and connection settings live in a private inventory, never in git:
+#   ansible-playbook -i inventory.windows.private.ini windows.yml
+# Requires: ansible-galaxy collection install -r requirements.yml
+- hosts: windows_local
+  gather_facts: false
+  vars:
+    bundle_dir: 'C:\cortex-bundle'
+    dsc_exe: 'C:\Program Files\Cortex\tools\dsc-3.3.0\dsc.exe'
+    prov_dir: 'C:\Program Files\Cortex\provisioning'
+  tasks:
+    - name: Stage the provisioning bundle
+      ansible.windows.win_copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+      loop:
+        - { src: "{{ playbook_dir }}/../windows/", dest: '{{ bundle_dir }}\infra\windows\' }
+        - { src: "{{ playbook_dir }}/../../db/", dest: '{{ bundle_dir }}\db\' }
+
+    - name: Install pinned dsc and stage Cortex resources
+      ansible.windows.win_command: >-
+        powershell.exe -NoProfile -ExecutionPolicy Bypass
+        -File "{{ bundle_dir }}\infra\windows\bootstrap.ps1" -Operation prepare
+      changed_when: false
+
+    - name: Apply the Cortex desired state
+      ansible.windows.dsc3:
+        config_file: '{{ prov_dir }}\cortex.dsc.yaml'
+        remote_config_file: true
+        executable: "{{ dsc_exe }}"
+        resource_path: ['{{ prov_dir }}\resources']
+        parameters: { pgPort: 5432 }
+        trace_level: info
+      register: dsc_result
+
+    - name: Keep the DSC result as evidence on the control node
+      ansible.builtin.copy:
+        content: "{{ dsc_result | to_nice_json }}"
+        dest: "{{ playbook_dir }}/evidence/{{ inventory_hostname }}-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}.json"
+        mode: '0600'
+      delegate_to: localhost
