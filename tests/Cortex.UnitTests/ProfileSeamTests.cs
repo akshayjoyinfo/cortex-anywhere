@@ -83,7 +83,7 @@ public sealed class LocalTenantTests
 
 public sealed class ModelGatewayTests
 {
-    private static ModelOptions Options(string url) => new() { Endpoint = new Uri(url), Name = "qwen3:1.7b" };
+    private static ModelOptions Options(string url) => new() { Endpoint = new Uri(url), Name = "qwen3:1.7b", EmbeddingName = "qwen3-embedding:0.6b" };
 
     [Theory]
     [InlineData("http://127.0.0.1:11434/v1")]
