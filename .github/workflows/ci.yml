@@ -33,11 +33,14 @@ jobs:
     env: { PGHOST: localhost, PGUSER: cortex_owner, PGPASSWORD: ci, PGDATABASE: cortex }
     steps:
       - uses: actions/checkout@v4
-      - run: psql -v ON_ERROR_STOP=1 -f db/migrations/0001_tenancy.sql
+      - name: Apply every migration in order
+        run: for f in db/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f" || exit 1; done
       - name: Every tenant table has FORCED RLS
         run: test -z "$(psql -tA -f db/checks/rls_forced.sql)"
       - name: Fail closed at the database
         run: psql -v ON_ERROR_STOP=1 -f db/checks/fail_closed.sql
+      - name: App role can use the vector type
+        run: psql -v ON_ERROR_STOP=1 -f db/checks/app_can_use_vector.sql
       - uses: actions/setup-dotnet@v4
         with: { dotnet-version: 10.0.x }
       - name: Leak suite and prompt injection corpus
