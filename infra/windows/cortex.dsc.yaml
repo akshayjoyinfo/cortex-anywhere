@@ -11,7 +11,28 @@ parameters:
   pgPort:
     type: int
     defaultValue: 5432
+  httpPort:
+    type: int
+    defaultValue: 5080
+  customerName:
+    type: string
+    defaultValue: local-customer
+  tenantName:
+    type: string
+    defaultValue: local
+  modelName:
+    type: string
+    defaultValue: 'qwen3:1.7b'
 resources:
+  - name: dotnet-sdk
+    type: Cortex.Windows/DotnetSdk
+    properties:
+      # Field test builds on the box. Customer installs will ship a published app instead.
+      version: 10.0.403
+      url: https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.403/dotnet-sdk-10.0.403-win-x64.zip
+      sha512: 7a114c318fa7f1d9822991b534b2814d0e78386ceda816b371f5141acefe741d87ccb606ede06cadac8f9ac5070e32b708a67bbd1619ff5e5a7858a27874ef48
+      installDir: 'C:\Program Files\Cortex\dotnet'
+
   - name: vc-runtime
     type: Cortex.Windows/VcRuntime
     properties:
@@ -73,3 +94,20 @@ resources:
       extensions: [vector]
       pgInstallDir: 'C:\Program Files\Cortex\pgsql\16.15-5'
       port: "[parameters('pgPort')]"
+
+  - name: local-install
+    type: Cortex.Windows/LocalInstall
+    dependsOn:
+      - "[resourceId('Cortex.Windows/DbChecks', 'db-checks')]"
+    properties:
+      configPath: 'C:\ProgramData\Cortex\config\cortex.json'
+      customerName: "[parameters('customerName')]"
+      tenantName: "[parameters('tenantName')]"
+      database: cortex
+      appRole: cortex_app
+      appSecret: pg-app
+      pgInstallDir: 'C:\Program Files\Cortex\pgsql\16.15-5'
+      port: "[parameters('pgPort')]"
+      httpPort: "[parameters('httpPort')]"
+      modelEndpoint: http://127.0.0.1:11434/v1
+      modelName: "[parameters('modelName')]"
