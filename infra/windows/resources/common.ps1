@@ -58,21 +58,24 @@ function Get-TextSha256([string] $Path) {
   } finally { $sha.Dispose() }
 }
 
-function Assert-Sha256Format([string] $Value, [string] $What) {
-  if ($Value -notmatch '^[0-9a-fA-F]{64}$') { throw "$What sha256 is not pinned (got '$Value')" }
+# A pin is a SHA256 (64 hex) or, where the vendor publishes it, a SHA512 (128 hex).
+function Get-PinAlgorithm([string] $Value, [string] $What) {
+  if ($Value -match '^[0-9a-fA-F]{64}$') { return 'SHA256' }
+  if ($Value -match '^[0-9a-fA-F]{128}$') { return 'SHA512' }
+  throw "$What hash is not pinned (got '$Value')"
 }
 
-# Download once into the cache, verify SHA256, return the cached path.
-function Get-PinnedFile([string] $Url, [string] $Sha256, [string] $Name, [string] $CacheDir) {
-  Assert-Sha256Format $Sha256 $Name
-  $want = $Sha256.ToLowerInvariant()
+# Download once into the cache, verify the pinned hash, return the cached path.
+function Get-PinnedFile([string] $Url, [string] $Hash, [string] $Name, [string] $CacheDir) {
+  $alg = Get-PinAlgorithm $Hash $Name
+  $want = $Hash.ToLowerInvariant()
   if (-not (Test-Path $CacheDir)) { New-Item -ItemType Directory -Force $CacheDir | Out-Null }
   $path = Join-Path $CacheDir ('{0}-{1}' -f $want.Substring(0, 12), $Name)
-  if ((Test-Path $path) -and (Get-Sha256 $path) -eq $want) { return $path }
+  if ((Test-Path $path) -and (Get-FileHash -Path $path -Algorithm $alg).Hash.ToLowerInvariant() -eq $want) { return $path }
   $tmp = "$path.part"
   (New-Object System.Net.WebClient).DownloadFile($Url, $tmp)
-  $got = Get-Sha256 $tmp
-  if ($got -ne $want) { Remove-Item $tmp -Force; throw "sha256 mismatch for $Url (expected $want, got $got)" }
+  $got = (Get-FileHash -Path $tmp -Algorithm $alg).Hash.ToLowerInvariant()
+  if ($got -ne $want) { Remove-Item $tmp -Force; throw "$alg mismatch for $Url (expected $want, got $got)" }
   Move-Item $tmp $path -Force
   $path
 }
