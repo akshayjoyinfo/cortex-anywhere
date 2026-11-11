@@ -8,3 +8,4 @@ obj/
 # provisioning evidence and private inventories stay out of git
 infra/ansible/evidence/
 infra/ansible/*.private.ini
+install-logs/
