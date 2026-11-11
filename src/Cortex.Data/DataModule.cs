@@ -1,3 +1,4 @@
+using Cortex.Agents;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pgvector.EntityFrameworkCore;
@@ -6,7 +7,7 @@ namespace Cortex.Data;
 
 public static class DataModule
 {
-    /// <summary>Connection goes through PgBouncer as cortex_app (no table ownership, no BYPASSRLS).</summary>
+    /// <summary>Connects as cortex_app (no table ownership, no BYPASSRLS). Server: through PgBouncer.</summary>
     public static IServiceCollection AddCortexData(this IServiceCollection services, string connectionString)
     {
         services.AddSingleton<TenantTransactionInterceptor>();
@@ -16,6 +17,9 @@ public static class DataModule
             .AddInterceptors(
                 sp.GetRequiredService<TenantTransactionInterceptor>(),
                 sp.GetRequiredService<RequireTransactionInterceptor>()));
+        services.AddScoped<IAgentCatalog, EfAgentCatalog>();
+        services.AddScoped<IMemoryStore, EfMemoryStore>();
+        services.AddScoped<IAuditLog, EfAuditLog>();
         return services;
     }
 }

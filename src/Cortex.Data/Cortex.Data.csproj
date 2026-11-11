@@ -6,5 +6,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cortex.Core\Cortex.Core.csproj" />
+    <!-- Implements the runtime's ports (IAgentCatalog, IMemoryStore, IAuditLog). -->
+    <ProjectReference Include="..\Cortex.Agents\Cortex.Agents.csproj" />
   </ItemGroup>
 </Project>
