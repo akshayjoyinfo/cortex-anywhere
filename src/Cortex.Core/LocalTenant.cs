@@ -12,6 +12,7 @@ public sealed class LocalInstallOptions
     public string TenantName { get; set; } = "";
     public int Port { get; set; } = 5080;
     public string SecretsDirectory { get; set; } = @"C:\ProgramData\Cortex\secrets";
+    public string MemoryKeySecret { get; set; } = "memory-key";
 }
 
 /// <summary>
