@@ -42,7 +42,7 @@ resources:
       version: '0.8.7'
       # Built once by .github/workflows/pgvector-windows.yml against the PostgreSQL pin above.
       url: https://github.com/akshayjoyinfo/cortex-anywhere/releases/download/pgvector-0.8.7-pg16.15-5-windows-x64/pgvector-0.8.7-pg16.15-5-windows-x64.zip
-      sha256: PENDING
+      sha256: f59163246dbfc8b64533ced8b8633925f082d7491db8629635f2b7a5e88d1e54
       pgInstallDir: 'C:\Program Files\Cortex\pgsql\16.15-5'
 
   - name: cortex-db
