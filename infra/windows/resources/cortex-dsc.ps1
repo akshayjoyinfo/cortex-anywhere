@@ -69,6 +69,14 @@ function Set-AdminOnlyAcl([string] $Path) {
   if ($r.Code) { throw "icacls failed on ${Path}: $($r.Out) $($r.Err)" }
 }
 
+# SYSTEM, Administrators and the given extra SIDs ('*S-1-...'), inheritance removed.
+function Set-RestrictedAcl([string] $Path, [string[]] $ExtraSids) {
+  $grants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F') + @($ExtraSids | ForEach-Object { "${_}:(OI)(CI)F" })
+  $r = Invoke-Native "$env:SystemRoot\System32\icacls.exe" (@($Path, '/inheritance:r', '/grant:r') + $grants)
+  if ($r.Code) { throw "icacls failed on ${Path}: $($r.Out) $($r.Err)" }
+  Write-Step 'acl' @{ path = $Path; grants = $grants }
+}
+
 function Get-SecretPath([string] $Name) { Join-Path $SecretDir "$Name.dpapi" }
 
 function Protect-Secret([string] $Name, [string] $Value) {
@@ -263,14 +271,22 @@ function Set-Postgres($d, $s) {
     if ((Test-Path $data) -and @(Get-ChildItem $data -Force).Count) { throw "$data is not empty and is not a cluster; refusing to touch it" }
     if (Test-Path (Get-SecretPath 'pg-superuser')) { $pw = Unprotect-Secret 'pg-superuser' }
     else { $pw = New-RandomSecret; Protect-Secret 'pg-superuser' $pw }
-    New-Item -ItemType Directory -Force (Split-Path $data) | Out-Null
-    $pwFile = Join-Path $SecretDir ('initdb-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    # initdb drops admin rights when started by an administrator, so the Administrators
+    # group no longer counts. Grant the installing account by its own SID instead.
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $dataRoot = Split-Path $data
+    New-Item -ItemType Directory -Force $dataRoot | Out-Null
+    Set-RestrictedAcl $dataRoot @("*${me}", '*S-1-5-20')          # installer + NetworkService
+    $tmpDir = Join-Path $CortexData ('tmp\initdb-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force $tmpDir | Out-Null
+    Set-RestrictedAcl $tmpDir @("*${me}")
+    $pwFile = Join-Path $tmpDir 'pwfile'
     try {
       [IO.File]::WriteAllText($pwFile, $pw, $Utf8)
       $r = Invoke-Native (Join-Path $bin 'initdb.exe') @('-D', $data, '-U', 'postgres', "--pwfile=$pwFile", '-A', 'scram-sha-256', '-E', 'UTF8', '--locale=C')
       Write-Step 'initdb' @{ exit = $r.Code; out = (Get-Tail $r.Out 800); err = (Get-Tail $r.Err 800) }
       if ($r.Code) { throw "initdb failed: $(Get-Tail $r.Err)" }
-    } finally { Remove-Item $pwFile -Force -ErrorAction SilentlyContinue }
+    } finally { Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue }
     # The service runs as NetworkService and must own its data directory.
     $r = Invoke-Native "$env:SystemRoot\System32\icacls.exe" @($data, '/grant', '*S-1-5-20:(OI)(CI)F')
     if ($r.Code) { throw "icacls on data dir failed: $($r.Out)" }
