@@ -137,6 +137,30 @@ function Invoke-DscConfig([string] $Verb) {
   [ordered]@{ exit = $r.Code; output = "dsc-$Verb.json" }
 }
 
+# The cause of a failure, pulled from the run's own evidence: resource errors
+# from steps.jsonl and ERROR lines from the dsc traces.
+function Get-RunErrors {
+  $errors = @()
+  $steps = Join-Path $RunDir 'steps.jsonl'
+  if (Test-Path $steps) {
+    foreach ($l in Get-Content $steps) {
+      try { $o = $l | ConvertFrom-Json } catch { continue }
+      if ($o.step -eq 'error') { $errors += [ordered]@{ source = $o.resource; op = $o.op; message = $o.detail.message } }
+    }
+  }
+  foreach ($t in @(Get-ChildItem $RunDir -Filter 'dsc-*.trace.jsonl' -ErrorAction SilentlyContinue)) {
+    foreach ($l in Get-Content $t.FullName) {
+      try { $o = $l | ConvertFrom-Json } catch { continue }
+      if ($o.PSObject.Properties['level'] -and $o.level -eq 'ERROR') {
+        $msg = "$($o.fields.message)"
+        if ($msg.Length -gt 600) { $msg = $msg.Substring(0, 600) + '...' }
+        $errors += [ordered]@{ source = 'dsc'; op = $t.BaseName; message = $msg }
+      }
+    }
+  }
+  $errors
+}
+
 function Get-TestSummary {
   $path = Join-Path $RunDir 'dsc-test.json'
   if (-not (Test-Path $path)) { return @() }
@@ -161,13 +185,14 @@ try {
 } catch { $failed = $_.Exception.Message }
 
 $resources = @(Get-TestSummary)
+$errors = @(Get-RunErrors)
 $inDesired = ($Operation -eq 'prepare') -or (@($resources).Count -gt 0 -and -not @($resources | Where-Object { $_['inDesiredState'] -ne $true }).Count)
 $summary = [ordered]@{
   run_id = $RunId; operation = $Operation; pg_port = $PgPort
   started = $Started.ToString('o'); finished = [DateTime]::UtcNow.ToString('o')
   minutes = [math]::Round(([DateTime]::UtcNow - $Started).TotalMinutes, 2)
   dsc_version = $Dsc.Version; steps = $Steps; resources = $resources
-  ok = ($null -eq $failed -and $inDesired); error = $failed
+  ok = ($null -eq $failed -and $inDesired); error = $failed; errors = $errors
 }
 Save-Json 'run.json' $summary
 [IO.File]::AppendAllText((Join-Path $DataDir 'logs\runs.jsonl'), ($summary | ConvertTo-Json -Compress -Depth 10) + "`n", $Utf8)
@@ -176,5 +201,6 @@ Write-Host ''
 foreach ($r in $resources) { if ($r.Contains('name')) { Write-Host ("  {0,-12} inDesiredState={1}" -f $r['name'], $r['inDesiredState']) } }
 Write-Host ("Result: {0}  minutes={1}" -f $(if ($summary.ok) { 'OK' } else { 'FAILED' }), $summary.minutes)
 if ($failed) { Write-Host "Error: $failed" }
+foreach ($e in $errors) { Write-Host ("  cause [{0} {1}] {2}" -f $e['source'], $e['op'], $e['message']) }
 Write-Host "Evidence: $RunDir"
 if (-not $summary.ok) { exit 1 }
