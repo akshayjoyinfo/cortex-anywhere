@@ -11,7 +11,7 @@ Every resource is idempotent: set reads state first and changes only what drifte
 #>
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('VcRuntime', 'Postgres', 'PgExtension', 'Database', 'DbChecks', 'DotnetSdk', 'LocalInstall', 'Ollama', 'OllamaModel', 'AppService')]
+  [ValidateSet('VcRuntime', 'Postgres', 'PgExtension', 'Database', 'DbChecks', 'DotnetSdk', 'LocalInstall', 'Ollama', 'OllamaModel', 'AppService', 'TailscaleUnattended')]
   [string] $Resource,
   [Parameter(Mandatory = $true)]
   [ValidateSet('get', 'test', 'set')]
@@ -787,6 +787,45 @@ function Set-AppService($d, $s) {
     Start-Sleep -Seconds 1
   }
   Write-Step 'alive' @{ seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
+}
+
+# ------------------------------------------------------------------ TailscaleUnattended
+# Operator access for machines WE run: Tailscale must connect at boot with nobody logged in
+# (field test finding: after a reboot RDP was lost until someone logged in on the console).
+# Customer installs do not use our tailnet, so this is off unless enabled. Installing and
+# joining Tailscale stays a human step (it needs an identity); this resource keeps it unattended.
+
+function Get-TailscaleExe { 'C:\Program Files\Tailscale\tailscale.exe' }
+
+function Get-TailscaleUnattendedState($d) {
+  $enabled = [bool](Need $d 'enabled')
+  $drift = @(); $force = $null; $svcState = $null; $svcStart = $null
+  if ($enabled) {
+    $svc = Get-Service -Name 'Tailscale' -ErrorAction SilentlyContinue
+    if (-not (Test-Path (Get-TailscaleExe)) -or -not $svc) { $drift += 'not-installed' }
+    else {
+      $svcState = "$($svc.Status)"; $svcStart = "$($svc.StartType)"
+      if ($svcStart -ne 'Automatic') { $drift += 'service-start' }
+      if ($svcState -ne 'Running') { $drift += 'service-stopped' }
+      $r = Invoke-Native (Get-TailscaleExe) @('debug', 'prefs')
+      try { $force = [bool](($r.Out | ConvertFrom-Json).ForceDaemon) } catch { $force = $false }
+      if (-not $force) { $drift += 'not-unattended' }
+    }
+  }
+  @{ ok = ($drift.Count -eq 0); state = [ordered]@{
+      enabled = $enabled; forceDaemon = $force; serviceState = $svcState; serviceStartType = $svcStart; drift = $drift } }
+}
+
+function Set-TailscaleUnattended($d, $s) {
+  $drift = @($s.state.drift)
+  if ($drift -contains 'not-installed') { throw 'Tailscale is not installed. Install it and join the tailnet first (human step), then re-run.' }
+  if ($drift -contains 'service-start') { Set-Service -Name 'Tailscale' -StartupType Automatic }
+  if ($drift -contains 'service-stopped') { Start-Service -Name 'Tailscale' }
+  if ($drift -contains 'not-unattended') {
+    $r = Invoke-Native (Get-TailscaleExe) @('set', '--unattended=true')
+    Write-Step 'unattended' @{ exit = $r.Code; err = (Get-Tail $r.Err 300) }
+    if ($r.Code) { throw "tailscale set --unattended=true failed: $(Get-Tail $r.Err)" }
+  }
 }
 
 # ------------------------------------------------------------------ LocalInstall

@@ -1,0 +1,117 @@
+{
+  "$schema": "https://aka.ms/dsc/schemas/v3/bundled/resource/manifest.json",
+  "type": "Cortex.Windows/TailscaleUnattended",
+  "version": "0.1.0",
+  "description": "Operator access (our servers only): Tailscale connects at boot with nobody logged in.",
+  "tags": [
+    "cortex",
+    "windows"
+  ],
+  "get": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "TailscaleUnattended",
+      "-Operation",
+      "get"
+    ],
+    "input": "stdin"
+  },
+  "test": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "TailscaleUnattended",
+      "-Operation",
+      "test"
+    ],
+    "input": "stdin",
+    "return": "state"
+  },
+  "set": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "TailscaleUnattended",
+      "-Operation",
+      "set"
+    ],
+    "input": "stdin",
+    "implementsPretest": true,
+    "return": "state"
+  },
+  "exitCodes": {
+    "0": "Success",
+    "1": "Error, see stderr and steps.jsonl"
+  },
+  "schema": {
+    "embedded": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "forceDaemon": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "serviceState": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "serviceStartType": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "readOnly": true
+        },
+        "_inDesiredState": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "readOnly": true
+        }
+      }
+    }
+  }
+}
