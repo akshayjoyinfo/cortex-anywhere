@@ -35,15 +35,22 @@ internal static class CanaryCommand
             var memory = sp.GetRequiredService<IMemoryStore>();
             await using (var tx = await db.Database.BeginTransactionAsync())
             {
-                if (!await db.Agents.AnyAsync(a => a.Name == "b-private-agent"))
+                // Each run has a fresh marker: create the agent, or re-mark the one from an earlier run.
+                var prompt = $"{marker} private agent of the canary tenant.";
+                var existing = await db.Agents.FirstOrDefaultAsync(a => a.Name == "b-private-agent");
+                if (existing is null)
                 {
                     db.Agents.Add(new Agent
                     {
                         Id = Guid.NewGuid(), TenantId = tenantId, Name = "b-private-agent",
-                        SystemPrompt = $"{marker} private agent of the canary tenant.", Model = "qwen3:1.7b", Tools = ["search_memory"],
+                        SystemPrompt = prompt, Model = "qwen3:1.7b", Tools = ["search_memory"],
                     });
-                    await db.SaveChangesAsync();
                 }
+                else
+                {
+                    existing.SystemPrompt = prompt;
+                }
+                await db.SaveChangesAsync();
                 await tx.CommitAsync();
             }
             string[] notes =
