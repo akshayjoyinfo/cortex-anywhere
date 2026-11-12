@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cortex Data Model ERD</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; the diagram first, then one table per concern (indexes, RLS, constraints).
+   Source of truth: db/migrations/0001_tenancy.sql and 0002_app_vector_usage.sql. */
+:root{--bg:#f4f6f7;--panel:#ffffff;--fg:#17212a;--muted:#59687a;--line:#d7dde2;--accent:#0f6e74;--accent-soft:#e3f1f2;--warn:#9a5b00;
+--sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"IBM Plex Mono",ui-monospace,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10161b;--panel:#172027;--fg:#e2e8ec;--muted:#93a2ae;--line:#283540;--accent:#5cc2c8;--accent-soft:#16343a;--warn:#e0a84a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10161b;--panel:#172027;--fg:#e2e8ec;--muted:#93a2ae;--line:#283540;--accent:#5cc2c8;--accent-soft:#16343a;--warn:#e0a84a;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);margin:0}
+main{max-width:1000px;margin:0 auto;padding-block:36px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:36px}
+h1{font-size:clamp(24px,4vw,34px);line-height:1.15;margin:4px 0 0;text-wrap:balance}
+h2{font-size:18px;margin:0;text-wrap:balance}
+.tag{font:500 11px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--accent)}
+.sub{color:var(--muted);margin:8px 0 0;max-width:64ch}
+section{display:grid;gap:12px;min-width:0}
+a{color:var(--accent)}
+code{font:13px var(--mono)}
+.fig{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;overflow-x:auto}
+.wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+td code{white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted);margin:0;padding:0;list-style:none}
+.legend b{color:var(--fg);font:500 12px var(--mono)}
+.pill{display:inline-block;font:500 11px var(--mono);padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.pill.none{background:transparent;border:1px solid var(--line);color:var(--muted)}
+.foot{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <span class="tag">cortex-anywhere · data model · v2</span>
+  <h1>Cortex data model: keys, indexes and isolation</h1>
+  <p class="sub">Built from <code>db/migrations</code>, the same files the installer applied on the Windows server. Only keys, indexed columns and the columns that drive security are shown; content and timestamps are left out.</p>
+</header>
+
+<section>
+  <span class="tag">ER diagram · schema cortex</span>
+  <h2>One customer owns tenants; every tenant table hangs off <code>tenant_id</code></h2>
+  <div class="fig"><pre class="mermaid">
+erDiagram
+  customers ||--o{ tenants : "customer_id"
+  tenants ||--o{ agents : "tenant_id"
+  tenants ||--o{ memory_item : "tenant_id"
+  tenants ||--o{ memory_episode : "tenant_id"
+  tenants ||--o{ audit_event : "tenant_id"
+  agents |o..o{ memory_item : "agent_id (logical)"
+  agents |o..o{ memory_episode : "agent_id (logical)"
+  memory_episode |o..o{ memory_item : "run_id (logical)"
+
+  customers {
+    uuid id PK
+    text legal_name
+  }
+  tenants {
+    uuid id PK
+    uuid customer_id FK
+    text tier "pooled or silo"
+    text status "active, quarantined, offboarded"
+    int run_retention_days "1 to 180"
+  }
+  agents {
+    uuid id PK
+    uuid tenant_id FK "RLS key"
+    text name
+    text_array tools "allow list"
+  }
+  memory_item {
+    uuid id PK
+    uuid tenant_id FK "RLS key, idx 1"
+    text namespace "idx 1"
+    vector embedding "1024 dims, HNSW idx 2"
+    uuid run_id "logical"
+    uuid agent_id "logical"
+    text source "run, mcp, admin"
+    text trust "user or retrieved"
+  }
+  memory_episode {
+    uuid id PK
+    uuid tenant_id FK "RLS key"
+    uuid run_id "logical"
+    uuid agent_id "logical"
+  }
+  audit_event {
+    bigint id PK "identity"
+    uuid tenant_id FK "RLS key"
+    text kind
+    jsonb detail "holds run_id"
+  }
+  </pre></div>
+  <ul class="legend">
+    <li><b>──</b> foreign key enforced by Postgres</li>
+    <li><b>‥‥</b> logical reference, no foreign key (kept for provenance, survives deletes)</li>
+    <li><b>PK</b> primary key, unique index</li>
+    <li><b>FK</b> foreign key</li>
+  </ul>
+</section>
+
+<section>
+  <span class="tag">Keys</span>
+  <h2>Primary and foreign keys</h2>
+  <div class="wrap"><table>
+    <tr><th>Table</th><th>Primary key</th><th>Foreign keys</th><th>Logical references</th></tr>
+    <tr><td><code>customers</code></td><td><code>id</code> uuid</td><td>none</td><td>none</td></tr>
+    <tr><td><code>tenants</code></td><td><code>id</code> uuid</td><td><code>customer_id → customers.id</code></td><td>none</td></tr>
+    <tr><td><code>agents</code></td><td><code>id</code> uuid</td><td><code>tenant_id → tenants.id</code></td><td>none</td></tr>
+    <tr><td><code>memory_item</code></td><td><code>id</code> uuid</td><td><code>tenant_id → tenants.id</code></td><td><code>agent_id</code>, <code>run_id</code></td></tr>
+    <tr><td><code>memory_episode</code></td><td><code>id</code> uuid</td><td><code>tenant_id → tenants.id</code></td><td><code>agent_id</code>, <code>run_id</code></td></tr>
+    <tr><td><code>audit_event</code></td><td><code>id</code> bigint identity</td><td><code>tenant_id → tenants.id</code></td><td><code>detail->>'run_id'</code></td></tr>
+    <tr><td><code>cortex_ops.schema_migrations</code></td><td><code>name</code> text</td><td>none</td><td><code>run_id</code> of the install run</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">Indexes</span>
+  <h2>Every index and what it serves</h2>
+  <div class="wrap"><table>
+    <tr><th>Index</th><th>Table</th><th>Columns</th><th>Type</th><th>Serves</th></tr>
+    <tr><td><code>memory_item_tenant</code> (idx 1)</td><td><code>memory_item</code></td><td><code>tenant_id, namespace</code></td><td>B-tree</td><td>Recall filter per tenant and namespace</td></tr>
+    <tr><td><code>memory_item_hnsw</code> (idx 2)</td><td><code>memory_item</code></td><td><code>embedding vector_cosine_ops</code></td><td>HNSW (pgvector)</td><td>Nearest notes by meaning; RLS still applies to the results</td></tr>
+    <tr><td><code>*_pkey</code></td><td>every table</td><td>primary key</td><td>B-tree, unique</td><td>Lookups by id</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">Isolation</span>
+  <h2>Row level security and what the app role may do</h2>
+  <div class="wrap"><table>
+    <tr><th>Table</th><th>RLS</th><th>Policy</th><th><code>cortex_app</code> may</th></tr>
+    <tr><td><code>customers</code></td><td><span class="pill">forced</span></td><td>none: no rows for the app</td><td><span class="pill none">nothing</span></td></tr>
+    <tr><td><code>tenants</code></td><td><span class="pill">forced</span></td><td><code>tenant_self</code>: <code>id = current_tenant()</code></td><td>SELECT</td></tr>
+    <tr><td><code>agents</code></td><td><span class="pill">forced</span></td><td rowspan="3"><code>tenant_isolation</code>: <code>tenant_id = current_tenant()</code> for reads and writes</td><td>SELECT, INSERT, UPDATE, DELETE</td></tr>
+    <tr><td><code>memory_item</code></td><td><span class="pill">forced</span></td><td>SELECT, INSERT, UPDATE, DELETE</td></tr>
+    <tr><td><code>memory_episode</code></td><td><span class="pill">forced</span></td><td>SELECT, INSERT, UPDATE, DELETE</td></tr>
+    <tr><td><code>audit_event</code></td><td><span class="pill">forced</span></td><td><code>tenant_isolation</code></td><td>SELECT, INSERT (append only)</td></tr>
+    <tr><td><code>cortex_ops.schema_migrations</code></td><td><span class="pill none">n/a</span></td><td>schema closed to PUBLIC</td><td><span class="pill none">nothing</span></td></tr>
+  </table></div>
+  <p class="sub"><code>cortex.current_tenant()</code> reads <code>app.tenant_id</code>, which the app sets per transaction. No tenant set means zero rows; a bad value is an error.</p>
+</section>
+
+<section>
+  <span class="tag">Constraints that carry rules</span>
+  <h2>Checks enforced by the database</h2>
+  <div class="wrap"><table>
+    <tr><th>Column</th><th>Allowed</th><th>Why</th></tr>
+    <tr><td><code>tenants.tier</code></td><td><code>pooled</code>, <code>silo</code></td><td>Silo is a tier, not a fork</td></tr>
+    <tr><td><code>tenants.status</code></td><td><code>active</code>, <code>quarantined</code>, <code>offboarded</code></td><td>Lifecycle state</td></tr>
+    <tr><td><code>tenants.run_retention_days</code></td><td>1 to 180</td><td>Hard cap on keeping runs and episodes</td></tr>
+    <tr><td><code>memory_item.source</code></td><td><code>run</code>, <code>mcp:n8n</code>, <code>mcp:assistant</code>, <code>admin</code></td><td>Provenance of every note</td></tr>
+    <tr><td><code>memory_item.trust</code></td><td><code>user</code>, <code>retrieved</code></td><td>Recall can filter by trust</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">See it live in DBeaver</span>
+  <h2>On the installed server</h2>
+  <div class="wrap"><table>
+    <tr><th>Setting</th><th>Value</th></tr>
+    <tr><td>Host, port</td><td><code>127.0.0.1</code>, <code>5432</code> (loopback only)</td></tr>
+    <tr><td>Database</td><td><code>cortex</code>, schemas <code>cortex</code> and <code>cortex_ops</code></td></tr>
+    <tr><td>Read only view as the app</td><td>Run <code>SET ROLE cortex_app;</code> in the SQL editor: without a pinned tenant every table shows zero rows</td></tr>
+    <tr><td>ER tab</td><td>Shows the enforced foreign keys; the dashed logical references above are not foreign keys and will not appear</td></tr>
+  </table></div>
+</section>
+
+<p class="foot">Source: <code>db/migrations/0001_tenancy.sql</code>, <code>0002_app_vector_usage.sql</code>; <code>cortex_ops</code> is created by the installer (<code>infra/windows/resources/cortex-dsc.ps1</code>). See also <a href="proof.html">the proof</a> and <a href="index.html">the field test overview</a>.</p>
+</main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+</script>
+</body>
+</html>
