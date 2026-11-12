@@ -160,7 +160,7 @@ resources:
     properties:
       version: '0.5.0'
       url: https://github.com/akshayjoyinfo/cortex-anywhere/releases/download/app-0.5.0/cortex-app-0.5.0-win-x64.zip
-      sha256: PENDING
+      sha256: 6afe2a13b0cffbd62a7d78fb5c15b4d408ce4f95c977c32599a917203478e2ea
       installDir: 'C:\Program Files\Cortex\app'
       serviceName: cortex-web
       dependsOn: cortex-postgres
