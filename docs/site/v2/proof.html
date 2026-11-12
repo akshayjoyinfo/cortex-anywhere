@@ -70,6 +70,13 @@ pre.cmd{margin:0;background:var(--panel);border:1px solid var(--line);border-rad
 figure{margin:0;display:grid;gap:8px}
 figure img{width:100%;max-width:100%;height:auto;border:1px solid var(--line);border-radius:6px;background:#0c0c0c}
 figcaption{color:var(--muted);font-size:13px}
+ol.try{margin:0;padding:0;list-style:none;display:grid;gap:12px;counter-reset:step}
+ol.try li{counter-increment:step;display:grid;grid-template-columns:28px minmax(0,1fr);gap:4px 12px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+ol.try li::before{content:counter(step);grid-row:1/4;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font:600 13px/24px var(--mono);text-align:center}
+ol.try .do{font-weight:600}
+ol.try pre{margin:0;font:12px/1.55 var(--mono);white-space:pre-wrap;word-break:break-all;color:var(--fg);background:var(--bg);border-radius:4px;padding:8px 10px}
+ol.try .got{color:var(--muted);font-size:13px}
+ol.try .got b{color:var(--ok);font-weight:600}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -121,6 +128,32 @@ figcaption{color:var(--muted);font-size:13px}
     <img src="fresh-install.png" alt="Console output of the timed install: 12 components in desired state, time per component, bootstrap 4.36 minutes, first answer 43.9 seconds, total 5.09 minutes, result OK" width="1915" height="730">
     <figcaption>The actual console of that run: 12 of 12 components in desired state, time per component, first agent answer at 6.55 tok/s, total 5.09 min.</figcaption>
   </figure>
+</section>
+
+<section>
+  <span class="tag">Test it yourself</span>
+  <h2>After the install, in an admin PowerShell on the same server</h2>
+  <ol class="try">
+    <li><span class="do">Who am I: the install tenant, signed in as your Windows user</span>
+      <pre>Invoke-RestMethod http://127.0.0.1:5080/api/whoami -UseDefaultCredentials</pre>
+      <span class="got">Verified: <b>profile local · tier silo · subject &lt;machine&gt;\Administrator</b></span></li>
+    <li><span class="do">Without a Windows login the app refuses</span>
+      <pre>try { Invoke-WebRequest http://127.0.0.1:5080/api/whoami -UseBasicParsing } catch { $_.Exception.Response.StatusCode }</pre>
+      <span class="got">Verified: <b>Unauthorized</b></span></li>
+    <li><span class="do">Tell the agent something; it is saved to memory</span>
+      <pre>$run = { param($q) Invoke-RestMethod http://127.0.0.1:5080/api/agents/assistant/runs -Method Post -UseDefaultCredentials -ContentType 'application/json' -Body (@{ input = $q } | ConvertTo-Json) -TimeoutSec 600 }
+(&amp; $run 'Remember: our support desk is open 08:00 to 16:00 CET, Monday to Friday.') | Select-Object output, stop, metrics | Format-List</pre>
+      <span class="got">Verified: <b>Answered in 30 s, 6.32 tok/s on CPU</b>, "The support desk is open from 08:00 to 16:00 CET, Monday to Friday."</span></li>
+    <li><span class="do">Ask in a new run; the answer comes from memory</span>
+      <pre>(&amp; $run 'When is our support desk open?') | Select-Object output, stop, metrics | Format-List</pre>
+      <span class="got">Expect: the hours from step 3, <code>recalledItems</code> of 1 or more</span></li>
+    <li><span class="do">See what was stored: provenance only, content stays encrypted</span>
+      <pre>(Invoke-RestMethod http://127.0.0.1:5080/api/memory/recent -UseDefaultCredentials).items | Format-Table runId, source, trust, contentBytes, createdAt</pre>
+      <span class="got">Expect: one row per run, <code>source run</code>, <code>trust user</code></span></li>
+    <li><span class="do">Run the full proof suite: build, tests, app, agent, 13 attacks on canary tenant B</span>
+      <pre>powershell -NoProfile -ExecutionPolicy Bypass -File C:\cortex-anywhere-prov-0.6.0\infra\windows\verify-app.ps1</pre>
+      <span class="got">About 20 minutes. Run it after steps 1 to 5: the attacks are stored in the demo tenant's memory.</span></li>
+  </ol>
 </section>
 
 <section>
