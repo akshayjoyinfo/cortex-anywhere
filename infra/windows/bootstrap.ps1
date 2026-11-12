@@ -18,7 +18,9 @@ Run elevated, from an extracted bundle (repository archive at a pinned tag):
 [CmdletBinding()]
 param(
   [ValidateSet('set', 'test', 'prepare')] [string] $Operation = 'set',
-  [ValidateRange(1024, 65535)] [int] $PgPort = 5432
+  [ValidateRange(1024, 65535)] [int] $PgPort = 5432,
+  # Our servers only: keep Tailscale connected at boot (Cortex.Windows/TailscaleUnattended).
+  [switch] $OperatorAccess
 )
 
 Set-StrictMode -Version 3
@@ -125,7 +127,7 @@ function Copy-Bundle {
 
 function Invoke-DscConfig([string] $Verb) {
   $params = Join-Path $RunDir 'parameters.json'
-  Save-Json 'parameters.json' @{ parameters = @{ pgPort = $PgPort } }
+  Save-Json 'parameters.json' @{ parameters = @{ pgPort = $PgPort; operatorAccess = [bool]$OperatorAccess } }
   $dscArgs = @('--trace-level', 'info', '--trace-format', 'json',
                'config', '--parameters-file', $params, $Verb,
                '--file', (Join-Path $ProvDir 'cortex.dsc.yaml'), '--output-format', 'json')

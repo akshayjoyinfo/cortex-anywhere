@@ -23,6 +23,10 @@ parameters:
   modelName:
     type: string
     defaultValue: 'qwen3:1.7b'
+  # Our servers only (bootstrap.ps1 -OperatorAccess). Customer installs leave it off.
+  operatorAccess:
+    type: bool
+    defaultValue: false
 resources:
   - name: dotnet-sdk
     type: Cortex.Windows/DotnetSdk
@@ -173,3 +177,9 @@ resources:
         - 'C:\ProgramData\Cortex\secrets\memory-key.dpapi'
       denyFiles:
         - 'C:\ProgramData\Cortex\secrets\pg-superuser.dpapi'
+
+  # Operator access for machines we run: Tailscale stays connected across reboots.
+  - name: operator-access
+    type: Cortex.Windows/TailscaleUnattended
+    properties:
+      enabled: "[parameters('operatorAccess')]"
