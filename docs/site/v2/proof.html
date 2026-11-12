@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cortex Anywhere Proof</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; every section is a diagram, a timeline or a table, never a paragraph.
+   Same identity as ../architecture.html and index.html: Plex, cool neutrals, one teal accent. */
+:root{--bg:#f4f6f7;--panel:#ffffff;--fg:#17212a;--muted:#59687a;--line:#d7dde2;--accent:#0f6e74;--accent-soft:#e3f1f2;--ok:#1d7a4a;--warn:#9a5b00;
+--sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"IBM Plex Mono",ui-monospace,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10161b;--panel:#172027;--fg:#e2e8ec;--muted:#93a2ae;--line:#283540;--accent:#5cc2c8;--accent-soft:#16343a;--ok:#5cc98d;--warn:#e0a84a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10161b;--panel:#172027;--fg:#e2e8ec;--muted:#93a2ae;--line:#283540;--accent:#5cc2c8;--accent-soft:#16343a;--ok:#5cc98d;--warn:#e0a84a;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);margin:0}
+main{max-width:1000px;margin:0 auto;padding-block:36px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:40px}
+h1{font-size:clamp(26px,4.4vw,38px);line-height:1.15;margin:4px 0 0;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:19px;margin:0;text-wrap:balance}
+.tag{font:500 11px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--accent)}
+.sub{color:var(--muted);margin:8px 0 0;max-width:62ch}
+section{display:grid;gap:14px;min-width:0}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+code{font:13px var(--mono)}
+.fig{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;overflow-x:auto}
+.wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+
+/* from -> to */
+.shift{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:stretch}
+.repo{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;display:grid;gap:8px;min-width:0}
+.repo.to{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.repo h3{margin:0;font:600 15px var(--mono)}
+.repo dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:13.5px}
+.repo dt{color:var(--muted)}
+.repo dd{margin:0;font-variant-numeric:tabular-nums}
+.arrow{align-self:center;font:500 22px var(--mono);color:var(--accent)}
+@media (max-width:640px){.shift{grid-template-columns:1fr}.arrow{justify-self:center;transform:rotate(90deg)}}
+
+/* rules */
+.rules{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
+.rules li{background:var(--accent-soft);color:var(--fg);border-radius:999px;padding:5px 12px;font-size:13px}
+.rules b{color:var(--accent)}
+
+/* phase timeline: a real sequence, so it is numbered */
+.phases{display:grid;gap:0;margin:0;padding:0;list-style:none;border-left:2px solid var(--line);margin-left:8px}
+.phases li{position:relative;padding:0 0 18px 22px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 16px}
+.phases li::before{content:"";position:absolute;left:-7px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--panel);border:2px solid var(--accent)}
+.phases li.done::before{background:var(--accent)}
+.phases .ph{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.phases .what{font-weight:600}
+.phases .ev{grid-column:1/-1;color:var(--muted);font-size:13.5px}
+.phases .metric{grid-row:1/3;grid-column:2;align-self:center;font:600 18px var(--sans);font-variant-numeric:tabular-nums;color:var(--accent);text-align:right}
+.phases .metric small{display:block;font:400 11px var(--mono);color:var(--muted);letter-spacing:.04em}
+
+/* implemented vs designed */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:640px){.split{grid-template-columns:1fr}}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:0}
+.col h3{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:8px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+.col ul{margin:0;padding-left:18px;display:grid;gap:4px;font-size:13.5px}
+.ok{background:var(--ok)}.wait{background:var(--warn)}
+.foot{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:14px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <span class="tag">cortex-anywhere · how it was proved</span>
+  <h1>Five questions, one Windows server, nothing installed by hand</h1>
+  <p class="sub">The day zero design was taken onto a real Vultr Windows Server, installed only through code, attacked, rebooted and timed. Every claim below has a run record behind it.</p>
+</header>
+
+<section>
+  <span class="tag">From design to running system</span>
+  <div class="shift">
+    <div class="repo">
+      <h3>cortex-lite</h3>
+      <dl>
+        <dt>Shape</dt><dd>Design + code skeleton</dd>
+        <dt>Target</dt><dd>Our Linux servers (Hetzner)</dd>
+        <dt>Commits</dt><dd>3</dd>
+        <dt>C# lines</dt><dd>540</dd>
+        <dt>ADRs</dt><dd>10</dd>
+        <dt>Tests</dt><dd>19 of 20 skipped</dd>
+        <dt>Runs</dt><dd>Nowhere yet</dd>
+      </dl>
+    </div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="repo to">
+      <h3>cortex-anywhere</h3>
+      <dl>
+        <dt>Shape</dt><dd>Running local profile</dd>
+        <dt>Target</dt><dd>Customer Windows + our servers</dd>
+        <dt>Commits</dt><dd>63</dd>
+        <dt>C# lines</dt><dd>2,328</dd>
+        <dt>ADRs</dt><dd>14</dd>
+        <dt>Tests</dt><dd>47 run · 8 skipped</dd>
+        <dt>Runs</dt><dd>Windows Server 2022, 14 tagged installs</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<section>
+  <span class="tag">The rules I worked by</span>
+  <ul class="rules">
+    <li><b>Evidence</b> over slides</li>
+    <li><b>Nothing</b> installed by hand</li>
+    <li>Every artifact <b>pinned by hash</b></li>
+    <li>Binaries <b>built in CI</b>, never on the target</li>
+    <li>Every run writes <b>JSON evidence</b></li>
+    <li><b>Stop</b> after each phase, report numbers</li>
+    <li>Mark what is <b>unverified</b></li>
+  </ul>
+</section>
+
+<section>
+  <span class="tag">The loop</span>
+  <h2>Code on the laptop, proof on the server</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart LR
+  L[Laptop<br>code + install config] -->|git push| G[GitHub]
+  G -->|CI: build, test,<br>leak suite| CI[Releases<br>app + pgvector<br>hash + provenance]
+  G -->|tag prov-x.y.z| B[Bundle]
+  B -->|one command| V[Vultr Windows Server<br>DSC v3 applies<br>12 components]
+  CI -.pinned by SHA256.-> V
+  V -->|run.json, steps.jsonl,<br>checks, hostile.json| E[(Evidence)]
+  E -->|read, fix, re-tag| L
+  </pre></div>
+  <div class="wrap"><table>
+    <tr><th>Ansible-like on Windows</th><th>What it means here</th></tr>
+    <tr><td>Microsoft DSC v3 config document</td><td>Desired state for 12 components; <code>set</code> converges, <code>test</code> reports drift</td></tr>
+    <tr><td>Own resources, one PowerShell script</td><td>Each checks state first and changes only what drifted</td></tr>
+    <tr><td><code>bootstrap.ps1</code></td><td>The only imperative step: fetch pinned <code>dsc</code>, apply, test, record</td></tr>
+    <tr><td>Ansible wrapper</td><td>Same document for our servers via <code>ansible.windows.dsc3</code> (written, not run)</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">Phase by phase</span>
+  <h2>Each phase ended on a tagged install and a measured result</h2>
+  <ol class="phases">
+    <li class="done"><span class="ph">Phase 0 · prov-0.1</span><span class="what">PostgreSQL 16 + pgvector, migrations, isolation checks</span><span class="metric">3/3<small>db checks</small></span><span class="ev">pgvector built once in CI. The field run caught a real migration bug; fixed in 0002.</span></li>
+    <li class="done"><span class="ph">Phase 1 · prov-0.2</span><span class="what">Profiles: Windows auth, DPAPI secrets, loopback only</span><span class="metric">4/4<small>app checks</small></span><span class="ev">Anonymous 401, install tenant via Windows login, RLS sees one tenant, 0.0.0.0 bind ignored.</span></li>
+    <li class="done"><span class="ph">Phase 2 · prov-0.3</span><span class="what">One agent end to end on CPU, memory with provenance</span><span class="metric">8.1 tok/s<small>warm, no GPU</small></span><span class="ev">Second run answered from memory written by the first; every run audited.</span></li>
+    <li class="done"><span class="ph">Phase 3 · prov-0.4</span><span class="what">Hostile test with canary tenant B</span><span class="metric">0 / 13<small>attacks leaked</small></span><span class="ev">Positive control first; 0 off machine connections over 1,452 samples.</span></li>
+    <li class="done"><span class="ph">Phase 4 · prov-0.5</span><span class="what">Windows service under its own account, reboot proof</span><span class="metric">≤ 15.2 s<small>back after boot</small></span><span class="ev">Nobody logged in. Remote access made reboot safe as code too.</span></li>
+    <li class="done"><span class="ph">Phase 5 · prov-0.6</span><span class="what">Reinstalled server to working agent, timed</span><span class="metric">5.09 min<small>one command</small></span><span class="ev">Per component: Ollama 43 s, PostgreSQL 42 s, models 41 s, app service 23 s.</span></li>
+    <li class="done"><span class="ph">Phase 6 · docs</span><span class="what">Answers written from the evidence</span><span class="metric">4 + 3<small>docs + ADRs</small></span><span class="ev">Profiles, integration seams, roadmap with exit tests, field test report.</span></li>
+  </ol>
+</section>
+
+<section>
+  <span class="tag">Niko's five questions</span>
+  <h2>Each answer is something that ran</h2>
+  <div class="wrap"><table>
+    <tr><th>Question</th><th>Proved on the server by</th><th>Number</th><th>Read</th></tr>
+    <tr><td>Integrate with the existing C#/.NET codebase</td><td>Four seams (tenant, data, model, tools) in .NET 10, running as a Windows service</td><td class="num">4 seams</td><td><a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/docs/16-integrating-existing-cortex.md">16</a> · <a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/docs/adr/013-integrate-through-seams.md">ADR 013</a></td></tr>
+    <tr><td>AI agent and memory architecture</td><td>Recall as labelled data, allow listed tools, semantic + episodic + audit memory tied by one run id, encrypted per tenant</td><td class="num">1 run id, 3 records</td><td><a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/src/Cortex.Agents/AgentRuntime.cs">AgentRuntime.cs</a></td></tr>
+    <tr><td>Local installs and a central server from one codebase</td><td><code>CORTEX_PROFILE=local|server</code>; local profile installed on a reinstalled server in one command</td><td class="num">5.09 min</td><td><a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/docs/15-deployment-profiles.md">15</a> · <a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/docs/adr/011-one-codebase-three-profiles.md">ADR 011</a></td></tr>
+    <tr><td>PostgreSQL, security, auth and isolation in both models</td><td>Postgres + FORCED RLS locally too; Windows auth; DPAPI; leak suite on the box and in CI; hostile corpus on the real model</td><td class="num">0 leaks</td><td><a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/docs/adr/012-postgres-in-every-mode.md">ADR 012</a> · <a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/docs/18-field-test.md">18</a></td></tr>
+    <tr><td>Roadmap to production ready</td><td>Phases with exit tests, no dates; every weakness the test found is placed</td><td class="num">5 phases</td><td><a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/docs/17-roadmap.md">17</a></td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">What the field test caught</span>
+  <h2>Problems found on the real machine, then fixed in code</h2>
+  <div class="wrap"><table>
+    <tr><th>Found</th><th>Fix</th></tr>
+    <tr><td>App role could not see the <code>vector</code> type</td><td>Migration 0002 plus a CI check</td></tr>
+    <tr><td><code>initdb</code> drops admin rights and could not read its secret</td><td>Grant the installer by its own account</td></tr>
+    <tr><td>Remote access lost after reboot until someone logged in</td><td>Tailscale unattended, now a checked install setting</td></tr>
+    <tr><td>A poisoned note resurfaced in a later answer (one tenant)</td><td>Roadmap phase 2: classify at write, recall by trust</td></tr>
+    <tr><td>Bare URLs pass the output gate</td><td>Roadmap phase 2: allow list or defang links</td></tr>
+    <tr><td>Windows PowerShell 5.1 traps in the installer (4 kinds)</td><td>Fixed and re-tagged; each failure printed its own cause</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">Implemented and tested vs designed</span>
+  <h2>What is real today</h2>
+  <div class="split">
+    <div class="col">
+      <h3><span class="dot ok" aria-hidden="true"></span>Running and tested on Windows</h3>
+      <ul>
+        <li>Install as code: 12 components, pinned, drift checked</li>
+        <li>PostgreSQL + pgvector with FORCED RLS</li>
+        <li>Local profile: Windows auth, DPAPI, loopback only</li>
+        <li>Agent loop, tool allow list, output gate</li>
+        <li>Memory with provenance, encrypted, audited</li>
+        <li>Leak suite and hostile corpus, 0 leaks</li>
+        <li>Windows service, survives reboot</li>
+        <li>CI releases with hash and provenance</li>
+      </ul>
+    </div>
+    <div class="col">
+      <h3><span class="dot wait" aria-hidden="true"></span>Designed, not yet running</h3>
+      <ul>
+        <li>Server profile: Keycloak, OpenBao, vLLM</li>
+        <li>Agent jobs on Hangfire, MCP endpoint</li>
+        <li>Hetzner Terraform and Ansible (Linux)</li>
+        <li>Ansible for Windows (written, not run)</li>
+        <li>Offline install, upgrade, backup and restore</li>
+        <li>GPU throughput, many tenants under load</li>
+        <li>Screens and billing</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<p class="foot">Repository: <a href="https://github.com/akshayjoyinfo/cortex-anywhere">github.com/akshayjoyinfo/cortex-anywhere</a> · Field test report: <a href="https://github.com/akshayjoyinfo/cortex-anywhere/blob/main/docs/18-field-test.md">docs/18</a> · Machine: Windows Server 2022, 4 vCPU, 8 GB RAM, no GPU.</p>
+</main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+</script>
+</body>
+</html>
