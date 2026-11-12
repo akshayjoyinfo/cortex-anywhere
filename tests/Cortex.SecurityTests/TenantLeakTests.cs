@@ -22,7 +22,7 @@ public sealed class TenantLeakTests
         Pg.Require();
         await Pg.SeedAsync();
         await using var c = new NpgsqlConnection(Pg.AsApp());
-        await c.OpenAsync();
+        await c.OpenAsync(Pg.Ct);
         Assert.Equal(0L, await Pg.Scalar<long>(c, null, "SELECT count(*) FROM cortex.memory_item"));
         Assert.Equal(0L, await Pg.Scalar<long>(c, null, "SELECT count(*) FROM cortex.agents"));
     }
@@ -33,9 +33,9 @@ public sealed class TenantLeakTests
         Pg.Require();
         await Pg.SeedAsync();
         await using var c = new NpgsqlConnection(Pg.AsApp());
-        await c.OpenAsync();
-        await using var tx = await c.BeginTransactionAsync();
-        await using (var cmd = new NpgsqlCommand("SELECT set_config('app.tenant_id', '', true)", c, tx)) await cmd.ExecuteNonQueryAsync();
+        await c.OpenAsync(Pg.Ct);
+        await using var tx = await c.BeginTransactionAsync(Pg.Ct);
+        await using (var cmd = new NpgsqlCommand("SELECT set_config('app.tenant_id', '', true)", c, tx)) await cmd.ExecuteNonQueryAsync(Pg.Ct);
         Assert.Equal(0L, await Pg.Scalar<long>(c, tx, "SELECT count(*) FROM cortex.memory_item"));
     }
 
@@ -45,11 +45,11 @@ public sealed class TenantLeakTests
         Pg.Require();
         var s = await Pg.SeedAsync();
         await using var c = new NpgsqlConnection(Pg.AsApp());
-        await c.OpenAsync();
+        await c.OpenAsync(Pg.Ct);
         await using var tx = await Pg.PinAsync(c, s.A);
         await using var cmd = new NpgsqlCommand("SELECT DISTINCT tenant_id FROM cortex.memory_item", c, tx);
         var tenants = new List<Guid>();
-        await using (var r = await cmd.ExecuteReaderAsync()) while (await r.ReadAsync()) tenants.Add(r.GetGuid(0));
+        await using (var r = await cmd.ExecuteReaderAsync(Pg.Ct)) while (await r.ReadAsync(Pg.Ct)) tenants.Add(r.GetGuid(0));
         Assert.Equal(new[] { s.A }, tenants);
     }
 
@@ -62,14 +62,14 @@ public sealed class TenantLeakTests
         int pid1, pid2;
         await using (var c1 = new NpgsqlConnection(cs))
         {
-            await c1.OpenAsync();
+            await c1.OpenAsync(Pg.Ct);
             await using var tx = await Pg.PinAsync(c1, s.A);
             pid1 = await Pg.Scalar<int>(c1, tx, "SELECT pg_backend_pid()");
             Assert.True(await Pg.Scalar<long>(c1, tx, "SELECT count(*) FROM cortex.memory_item") > 0);
-            await tx.CommitAsync();
+            await tx.CommitAsync(Pg.Ct);
         }
         await using var c2 = new NpgsqlConnection(cs);
-        await c2.OpenAsync();
+        await c2.OpenAsync(Pg.Ct);
         pid2 = await Pg.Scalar<int>(c2, null, "SELECT pg_backend_pid()");
         Assert.Equal(pid1, pid2);
         Assert.Equal(0L, await Pg.Scalar<long>(c2, null, "SELECT count(*) FROM cortex.memory_item"));
@@ -81,14 +81,14 @@ public sealed class TenantLeakTests
         Pg.Require();
         var s = await Pg.SeedAsync();
         await using var c = new NpgsqlConnection(Pg.AsApp());
-        await c.OpenAsync();
+        await c.OpenAsync(Pg.Ct);
         await using var tx = await Pg.PinAsync(c, s.A);
         // Query with B's exact embedding: if isolation failed, B's canary would rank first.
         await using var cmd = new NpgsqlCommand(
             $"SELECT tenant_id, convert_from(content, 'UTF8') FROM cortex.memory_item ORDER BY embedding <=> '{Pg.Literal(Pg.Axis(1))}'::vector LIMIT 10", c, tx);
-        await using var r = await cmd.ExecuteReaderAsync();
+        await using var r = await cmd.ExecuteReaderAsync(Pg.Ct);
         var rows = 0;
-        while (await r.ReadAsync())
+        while (await r.ReadAsync(Pg.Ct))
         {
             rows++;
             Assert.Equal(s.A, r.GetGuid(0));
@@ -103,7 +103,7 @@ public sealed class TenantLeakTests
         Pg.Require();
         var s = await Pg.SeedAsync();
         await using var c = new NpgsqlConnection(Pg.AsApp());
-        await c.OpenAsync();
+        await c.OpenAsync(Pg.Ct);
         await using var tx = await Pg.PinAsync(c, s.A);
         var ex = await Assert.ThrowsAsync<PostgresException>(() => Pg.Exec(c,
             "INSERT INTO cortex.agents (tenant_id, name, system_prompt) VALUES (@b, 'x', 'x')", ("b", s.B)));
@@ -123,7 +123,7 @@ public sealed class TenantLeakTests
         {
             await using var dbB = Db(accessor);
             await new EfMemoryStore(dbB, protector, accessor).WriteItemAsync(
-                new NewMemory("default", s.Marker + " support opens 07:00", Pg.Axis(1), Guid.NewGuid(), Guid.Empty, "admin", "user"), default);
+                new NewMemory("default", s.Marker + " support opens 07:00", Pg.Axis(1), Guid.NewGuid(), Guid.Empty, "admin", "user"), Pg.Ct);
         }
 
         // A has its own note, then searches with B's exact embedding.
@@ -131,8 +131,8 @@ public sealed class TenantLeakTests
         {
             await using var dbA = Db(accessor);
             var store = new EfMemoryStore(dbA, protector, accessor);
-            await store.WriteItemAsync(new NewMemory("default", "A support opens 09:00", Pg.Axis(0), Guid.NewGuid(), Guid.Empty, "admin", "user"), default);
-            var hits = await store.SearchAsync(Pg.Axis(1), ["default"], 10, default);
+            await store.WriteItemAsync(new NewMemory("default", "A support opens 09:00", Pg.Axis(0), Guid.NewGuid(), Guid.Empty, "admin", "user"), Pg.Ct);
+            var hits = await store.SearchAsync(Pg.Axis(1), ["default"], 10, Pg.Ct);
             Assert.Contains(hits, h => h.Content == "A support opens 09:00");   // the search works
             Assert.DoesNotContain(hits, h => h.Content.Contains(s.Marker));    // and never crosses tenants
         }
@@ -143,7 +143,7 @@ public sealed class TenantLeakTests
     {
         Pg.Require();
         await using var c = new NpgsqlConnection(Pg.Admin);
-        await c.OpenAsync();
+        await c.OpenAsync(Pg.Ct);
         Assert.Equal(0L, await Pg.Scalar<long>(c, null,
             "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
             "WHERE n.nspname = 'cortex' AND c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity)"));

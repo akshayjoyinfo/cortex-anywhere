@@ -70,7 +70,7 @@ public sealed partial class PromptInjectionTests
         {
             await using var dbB = TenantLeakTests.Db(accessor);
             await new EfMemoryStore(dbB, protector, accessor).WriteItemAsync(
-                new NewMemory("default", s.Marker + " tenant B support opens 07:00", Pg.Axis(1), Guid.NewGuid(), Guid.Empty, "admin", "user"), default);
+                new NewMemory("default", s.Marker + " tenant B support opens 07:00", Pg.Axis(1), Guid.NewGuid(), Guid.Empty, "admin", "user"), Pg.Ct);
         }
 
         // Tenant A's agent, real store, model scripted to go looking for tenant B.
@@ -100,9 +100,9 @@ public sealed partial class PromptInjectionTests
         var run = new AgentRunContext();
         var runtime = new AgentRuntime(new Catalog(agent), memory, gateway, new ToolRegistry([new SearchMemoryTool(memory, gateway, run)]),
             run, new BasicOutputPolicy(), new NoAudit(), accessor);
-        if (alreadyScoped) return await runtime.RunAsync(new AgentRunRequest(agent.Id, Guid.NewGuid(), input), default);
+        if (alreadyScoped) return await runtime.RunAsync(new AgentRunRequest(agent.Id, Guid.NewGuid(), input), Pg.Ct);
         using var _ = TenantScope.Begin(new TenantContext(tenant, "silo", "attacker"));
-        return await runtime.RunAsync(new AgentRunRequest(agent.Id, Guid.NewGuid(), input), default);
+        return await runtime.RunAsync(new AgentRunRequest(agent.Id, Guid.NewGuid(), input), Pg.Ct);
     }
 
     private static ChatResponse Text(string t) => new(new ChatMessage(ChatRole.Assistant, t));

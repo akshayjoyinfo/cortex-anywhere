@@ -14,6 +14,9 @@ internal static class Pg
 {
     public static string? Admin => Environment.GetEnvironmentVariable("CORTEX_TEST_PG");
 
+    /// <summary>The running test's token (xUnit1051): cancelled runs stop database work promptly.</summary>
+    public static CancellationToken Ct => TestContext.Current.CancellationToken;
+
     public static void Require()
     {
         if (string.IsNullOrWhiteSpace(Admin))
@@ -45,7 +48,7 @@ internal static class Pg
     {
         var seed = new Seed(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "BCANARY" + Guid.NewGuid().ToString("N")[..12]);
         await using var c = new NpgsqlConnection(Admin);
-        await c.OpenAsync();
+        await c.OpenAsync(Ct);
         await Exec(c, "INSERT INTO cortex.customers (id, legal_name) VALUES (@c, 'security-test')", ("c", seed.Customer));
         await Exec(c, "INSERT INTO cortex.tenants (id, customer_id, name) VALUES (@a, @c, 'sec-a'), (@b, @c, 'sec-b')",
             ("a", seed.A), ("b", seed.B), ("c", seed.Customer));
@@ -63,22 +66,22 @@ internal static class Pg
     {
         await using var cmd = new NpgsqlCommand(sql, c);
         foreach (var (n, v) in ps) cmd.Parameters.AddWithValue(n, v);
-        await cmd.ExecuteNonQueryAsync();
+        await cmd.ExecuteNonQueryAsync(Ct);
     }
 
     public static async Task<T?> Scalar<T>(NpgsqlConnection c, NpgsqlTransaction? tx, string sql)
     {
         await using var cmd = new NpgsqlCommand(sql, c, tx);
-        var r = await cmd.ExecuteScalarAsync();
+        var r = await cmd.ExecuteScalarAsync(Ct);
         return r is null or DBNull ? default : (T)Convert.ChangeType(r, typeof(T), CultureInfo.InvariantCulture);
     }
 
     public static async Task<NpgsqlTransaction> PinAsync(NpgsqlConnection c, Guid tenant)
     {
-        var tx = await c.BeginTransactionAsync();
+        var tx = await c.BeginTransactionAsync(Ct);
         await using var cmd = new NpgsqlCommand("SELECT set_config('app.tenant_id', @t, true)", c, tx);
         cmd.Parameters.AddWithValue("t", tenant.ToString());
-        await cmd.ExecuteNonQueryAsync();
+        await cmd.ExecuteNonQueryAsync(Ct);
         return tx;
     }
 }
