@@ -18,8 +18,12 @@ Run elevated from the extracted bundle, after bootstrap.ps1:
 [CmdletBinding()]
 param(
   [string] $ConfigPath = 'C:\ProgramData\Cortex\config\cortex.json',
-  [ValidateSet('build', 'tests', 'app', 'agent', 'hostile')] [string[]] $Steps = @('build', 'tests', 'app', 'agent', 'hostile')
+  [string[]] $Steps = @('build', 'tests', 'app', 'agent', 'hostile')
 )
+# powershell -File passes "app,agent" as one string: split it, then validate.
+$Steps = @($Steps | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+$bad = @($Steps | Where-Object { $_ -notin 'build', 'tests', 'app', 'agent', 'hostile' })
+if ($bad.Count) { throw "Unknown step(s): $($bad -join ', '). Use build, tests, app, agent, hostile." }
 # Prerequisites: tests and hostile need a build; agent and hostile need the app checked.
 if ($Steps -contains 'tests' -or $Steps -contains 'hostile') { $Steps = @($Steps) + 'build' | Select-Object -Unique }
 if ($Steps -contains 'agent' -or $Steps -contains 'hostile') { $Steps = @($Steps) + 'app' | Select-Object -Unique }
