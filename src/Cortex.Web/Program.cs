@@ -11,7 +11,12 @@ if (role is not ("web" or "worker" or "canary"))
     throw new ArgumentException($"Unknown role '{role}'. Use web or worker.");
 
 // The canary role takes positional arguments; keep them away from configuration.
-var builder = WebApplication.CreateBuilder(role == "canary" ? [] : args.Skip(1).ToArray());
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = role == "canary" ? [] : args.Skip(1).ToArray(),
+    // A Windows service starts in System32; content lives next to the executable.
+    ContentRootPath = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : null,
+});
 
 // One codebase, two profiles (ADR 011). The profile only decides where things come from.
 var profile = CortexProfiles.Resolve(builder.Configuration);
@@ -40,6 +45,9 @@ if (profile == CortexProfile.Local)
 
     // Everything binds to loopback. ASPNETCORE_URLS and appsettings cannot widen it.
     builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, install.Port));
+
+    // Runs as the Windows service cortex-web (Cortex.Windows/AppService). No-op in a console.
+    builder.Services.AddWindowsService(o => o.ServiceName = "cortex-web");
 }
 else
 {
