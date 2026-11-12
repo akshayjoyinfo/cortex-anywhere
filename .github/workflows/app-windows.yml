@@ -1,0 +1,67 @@
+name: app-windows
+# Publishes the Cortex app once, in CI, as a self-contained win-x64 build (ADR 014).
+# Targets install it by URL and SHA256 (Cortex.Windows/AppService): no SDK or .NET runtime
+# is needed on a customer machine. Releases are immutable: an existing version fails.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App version, for example 0.5.0
+        required: true
+
+permissions:
+  contents: write       # create the release
+  id-token: write       # build provenance
+  attestations: write
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  publish:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: 10.0.403 }
+
+      - name: Version is plain semver
+        shell: pwsh
+        run: if ('${{ inputs.version }}' -notmatch '^\d+\.\d+\.\d+$') { throw 'version must look like 0.5.0' }
+
+      - name: Unit tests on Windows (DPAPI test runs for real here)
+        run: dotnet test --project tests/Cortex.UnitTests -c Release
+
+      - name: Publish self-contained win-x64
+        run: dotnet publish src/Cortex.Web/Cortex.Web.csproj -c Release -r win-x64 --self-contained true -p:Version=${{ inputs.version }} -o publish
+
+      - name: Package
+        id: pkg
+        shell: pwsh
+        run: |
+          $name = "cortex-app-${{ inputs.version }}-win-x64"
+          [ordered]@{
+            version = '${{ inputs.version }}'; source_commit = $env:GITHUB_SHA
+            sdk = (dotnet --version); runner = "$env:ImageOS $env:ImageVersion"
+            run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          } | ConvertTo-Json | Set-Content publish\BUILDINFO.json
+          Compress-Archive -Path publish\* -DestinationPath "$name.zip"
+          $h = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$h  $name.zip" | Set-Content "$name.zip.sha256"
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "### $name`nsha256: ``$h``" >> $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-path: ${{ steps.pkg.outputs.name }}.zip
+
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $n = '${{ steps.pkg.outputs.name }}'
+          gh release create "app-${{ inputs.version }}" "$n.zip" "$n.zip.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title $n --notes-file publish\BUILDINFO.json
+          if ($LASTEXITCODE) { throw 'release failed (version exists? releases are immutable)' }
