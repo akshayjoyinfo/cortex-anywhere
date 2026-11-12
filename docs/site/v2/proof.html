@@ -66,6 +66,10 @@ th{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color
 .col ul{margin:0;padding-left:18px;display:grid;gap:4px;font-size:13.5px}
 .ok{background:var(--ok)}.wait{background:var(--warn)}
 .foot{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:14px}
+pre.cmd{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;font:12.5px/1.6 var(--mono);white-space:pre-wrap;word-break:break-all}
+figure{margin:0;display:grid;gap:8px}
+figure img{width:100%;max-width:100%;height:auto;border:1px solid var(--line);border-radius:6px;background:#0c0c0c}
+figcaption{color:var(--muted);font-size:13px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -107,6 +111,16 @@ th{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color
       </dl>
     </div>
   </div>
+</section>
+
+<section>
+  <span class="tag">One command on a fresh Vultr server</span>
+  <h2>Reinstalled Windows Server 2022 to a working agent in 5.09 minutes</h2>
+  <pre class="cmd">iwr https://github.com/akshayjoyinfo/cortex-anywhere/archive/refs/tags/prov-0.6.0.zip -OutFile C:\cortex-bundle.zip; Expand-Archive C:\cortex-bundle.zip C:\ -Force; powershell -NoProfile -ExecutionPolicy Bypass -File C:\cortex-anywhere-prov-0.6.0\infra\windows\install.ps1 -OperatorAccess</pre>
+  <figure>
+    <img src="fresh-install.png" alt="Console output of the timed install: 12 components in desired state, time per component, bootstrap 4.36 minutes, first answer 43.9 seconds, total 5.09 minutes, result OK" width="1915" height="730">
+    <figcaption>The actual console of that run: 12 of 12 components in desired state, time per component, first agent answer at 6.55 tok/s, total 5.09 min.</figcaption>
+  </figure>
 </section>
 
 <section>
