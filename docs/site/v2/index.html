@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cortex Anywhere Field Test</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Same system as ../architecture.html: one reading column, a diagram and at most one table per section */
+:root{--bg:#f6f7f8;--panel:#ffffff;--fg:#1b2329;--muted:#5d6b75;--line:#d9dee2;--accent:#0f6e74;--warn:#9a5b00;
+--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#11171b;--panel:#182127;--fg:#e3e8eb;--muted:#93a1aa;--line:#2a363d;--accent:#5cc2c8;--warn:#e0a84a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#11171b;--panel:#182127;--fg:#e3e8eb;--muted:#93a1aa;--line:#2a363d;--accent:#5cc2c8;--warn:#e0a84a;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--sans);margin:0}
+main{max-width:980px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:36px}
+h1{font-size:28px;margin:0;text-wrap:balance}
+h2{font-size:18px;margin:0 0 4px;text-wrap:balance}
+.lede{color:var(--muted);margin:6px 0 0;max-width:65ch}
+.tag{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+section{display:grid;gap:10px;min-width:0}
+.fig{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;overflow-x:auto}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+code{font:13px var(--mono)}
+a{color:var(--accent)}
+.rule{border-left:3px solid var(--accent);padding:8px 12px;background:var(--panel)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.stat b{display:block;font:600 26px var(--sans);font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:13px}
+.warn{color:var(--warn);font-weight:600}
+ul{margin:0;padding-left:20px}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <span class="tag">cortex-anywhere · field test · v2</span>
+  <h1>Cortex Anywhere: the day zero design, running on Windows</h1>
+  <p class="lede">The <a href="../architecture.html">day zero architecture</a> was built for our own servers. Here the same codebase runs as a single customer install on a real Windows Server 2022 with no GPU, installed as code, attacked, rebooted and timed.</p>
+</header>
+
+<div class="rule"><b>Fail closed, everywhere.</b> Right tenant's data, or no data. Same rule, same database guarantee, on a customer's machine and on our servers.</div>
+
+<div class="stats">
+  <div class="stat"><b>5.09 min</b><span>freshly reinstalled server to first answered agent run, one command</span></div>
+  <div class="stat"><b>0 of 13</b><span>attacks leaked the other tenant's data; nothing left the machine</span></div>
+  <div class="stat"><b>≤ 15.2 s</b><span>after a reboot, every part back by itself, nobody logged in</span></div>
+  <div class="stat"><b>8 to 11 tok/s</b><span>Qwen3 1.7B on 4 CPU threads, warm; 5 to 7 cold</span></div>
+</div>
+
+<section>
+  <span class="tag">1 · Local profile on Windows</span>
+  <h2>Everything on one machine, everything on loopback</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart LR
+  U([Windows user]) -->|Negotiate| W
+  subgraph host[Windows Server, no inbound ports]
+    W[cortex-web service<br>NT SERVICE\cortex-web] -->|cortex_app, RLS| P[(PostgreSQL 16 + pgvector<br>cortex-postgres service)]
+    W -->|OpenAI API| O[Ollama, CPU<br>boot task, NetworkService]
+    W -.reads.-> S[[DPAPI secrets<br>app password, memory key]]
+  end
+  OP([Operator]) -->|tailnet, unattended| host
+  </pre></div>
+  <div class="wrap"><table>
+    <tr><th>Guardrail</th><th>How it is enforced</th></tr>
+    <tr><td>Loopback only</td><td>App, database and model refuse non loopback; <code>ASPNETCORE_URLS=0.0.0.0</code> ignored</td></tr>
+    <tr><td>Least privilege</td><td>Service account reads config + 2 secrets; the superuser secret is checked unreadable</td></tr>
+    <tr><td>One fixed tenant</td><td>Install config plus Windows login; anonymous calls get 401</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">2 · The five questions</span>
+  <h2>Each answer has running code and evidence behind it</h2>
+  <div class="wrap"><table>
+    <tr><th>Question</th><th>Answer</th><th>Read</th></tr>
+    <tr><td>Integrate with the existing C#/.NET code</td><td>Four seams (tenant, data, model, tools); strangler beside the app; proven on Windows with .NET 10</td><td><a href="../../16-integrating-existing-cortex.md">16</a> · <a href="../../adr/013-integrate-through-seams.md">ADR 013</a></td></tr>
+    <tr><td>Agent and memory architecture</td><td>One stateless loop; recall as labelled data; allow listed tools; memory with provenance, encrypted per tenant</td><td><a href="../../08-agents-workflows-memory.md">08</a> · section 3 below</td></tr>
+    <tr><td>Local installs and central server from one codebase</td><td><code>CORTEX_PROFILE=local|server</code>; local, dedicated, SaaS from one binary</td><td><a href="../../15-deployment-profiles.md">15</a> · <a href="../../adr/011-one-codebase-three-profiles.md">ADR 011</a></td></tr>
+    <tr><td>Postgres, security, auth, isolation in both models</td><td>Postgres + FORCED RLS in every mode; Windows auth locally, JWT on servers; leak suite in CI and on the box</td><td><a href="../../adr/012-postgres-in-every-mode.md">ADR 012</a> · <a href="../../07-tenant-isolation.md">07</a></td></tr>
+    <tr><td>Roadmap to production ready</td><td>Phases with exit tests, no dates; every field test gap placed</td><td><a href="../../17-roadmap.md">17</a></td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">3 · One agent run</span>
+  <h2>The model is treated as untrusted at every step</h2>
+  <div class="fig"><pre class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant R as AgentRuntime
+  participant DB as Postgres (RLS)
+  participant M as Qwen3
+  U->>R: input (tenant from TenantContext)
+  R->>DB: recall: nearest notes, tenant pinned
+  R->>M: system prompt + user turn with recalled notes as data
+  M-->>R: answer or tool call
+  R->>R: tool on the allow list? else refuse and record
+  R->>R: output gate: strip reasoning and images
+  R->>DB: memory item + episode + audit, one run_id
+  R-->>U: answer
+  </pre></div>
+  <div class="wrap"><table>
+    <tr><th>Table</th><th>Kind</th><th>Holds</th></tr>
+    <tr><td><code>memory_item</code></td><td>Semantic</td><td>Encrypted note, <code>vector(1024)</code>, source, trust, run_id</td></tr>
+    <tr><td><code>memory_episode</code></td><td>Episodic</td><td>One encrypted record per run: input, output, tool calls</td></tr>
+    <tr><td><code>audit_event</code></td><td>Audit</td><td>Append only: who ran what, stop reason, speed</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <span class="tag">4 · Install as code</span>
+  <h2>One command, pinned artifacts, JSON evidence</h2>
+  <div class="fig"><pre class="mermaid">
+flowchart LR
+  B[bootstrap.ps1] -->|pinned + hashed| D[dsc v3]
+  D --> C[cortex.dsc.yaml<br>12 components]
+  CI[CI builds app and pgvector<br>hash + provenance] -.release.-> C
+  C --> T[dsc test: drift check]
+  T --> E[(run.json, steps.jsonl,<br>bundle hash)]
+  </pre></div>
+  <p class="lede">No version resolves "latest". The customer machine never compiles code. Every run records what it changed. See <a href="../../adr/014-provisioning-as-code.md">ADR 014</a>.</p>
+</section>
+
+<section>
+  <span class="tag">5 · Hostile test</span>
+  <h2>Canary tenant B, 13 attacks on tenant A's real agent</h2>
+  <div class="wrap"><table>
+    <tr><th>Check</th><th>Result</th></tr>
+    <tr><td>Positive control: scanner finds B's marker in B's own data</td><td>4 notes, 1 agent</td></tr>
+    <tr><td>B marker in A's outputs or tool arguments</td><td>0 of 13 runs</td></tr>
+    <tr><td>B marker in A's decrypted memory, episodes, audit, agents</td><td>0 of 34 each</td></tr>
+    <tr><td>A runs B's agent</td><td>404</td></tr>
+    <tr><td>Connections off the machine during the attacks</td><td>0 over 1452 samples</td></tr>
+    <tr><td>Model passed <code>namespace: "tenant-b"</code> to the tool</td><td>Ignored: tenant bound in code</td></tr>
+  </table></div>
+  <p class="warn">Found inside one tenant: a poisoned note resurfaced in a later answer, bare URLs pass the output gate, and recall can be crowded out. All three are on the <a href="../../17-roadmap.md">roadmap</a>.</p>
+</section>
+
+<section>
+  <span class="tag">6 · Not tested yet</span>
+  <h2>What this field test does not prove</h2>
+  <ul>
+    <li>Server profile at runtime: Keycloak, OpenBao, vLLM, Hangfire jobs, MCP.</li>
+    <li>GPU throughput and many tenants under load.</li>
+    <li>Offline install, upgrade and rollback, backup and restore.</li>
+    <li>Windows auth for non admin and domain users.</li>
+  </ul>
+  <p class="lede">Full numbers and method: <a href="../../18-field-test.md">18 · Field test</a>.</p>
+</section>
+</main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+</script>
+</body>
+</html>
