@@ -7,10 +7,11 @@ using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.EntityFrameworkCore;
 
 var role = args.FirstOrDefault() ?? "web";
-if (role is not ("web" or "worker"))
+if (role is not ("web" or "worker" or "canary"))
     throw new ArgumentException($"Unknown role '{role}'. Use web or worker.");
 
-var builder = WebApplication.CreateBuilder(args.Skip(1).ToArray());
+// The canary role takes positional arguments; keep them away from configuration.
+var builder = WebApplication.CreateBuilder(role == "canary" ? [] : args.Skip(1).ToArray());
 
 // One codebase, two profiles (ADR 011). The profile only decides where things come from.
 var profile = CortexProfiles.Resolve(builder.Configuration);
@@ -70,6 +71,15 @@ else
 }
 
 var app = builder.Build();
+
+if (role == "canary")
+{
+    if (profile != CortexProfile.Local)
+        throw new InvalidOperationException("The canary role is a field test tool and runs in the local profile only.");
+    Environment.ExitCode = await CanaryCommand.RunAsync(app.Services, [.. args.Skip(1)]);
+    return;
+}
+
 app.MapDefaultEndpoints();
 
 if (role == "web")
