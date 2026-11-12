@@ -11,7 +11,7 @@ Every resource is idempotent: set reads state first and changes only what drifte
 #>
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('VcRuntime', 'Postgres', 'PgExtension', 'Database', 'DbChecks', 'DotnetSdk', 'LocalInstall', 'Ollama', 'OllamaModel')]
+  [ValidateSet('VcRuntime', 'Postgres', 'PgExtension', 'Database', 'DbChecks', 'DotnetSdk', 'LocalInstall', 'Ollama', 'OllamaModel', 'AppService')]
   [string] $Resource,
   [Parameter(Mandatory = $true)]
   [ValidateSet('get', 'test', 'set')]
@@ -667,6 +667,126 @@ function Set-OllamaModel($d, $s) {
   if ($after.state.installedDigest -and $after.state.installedDigest -ne $after.state.digest) {
     throw "registry served $name with digest $($after.state.installedDigest), pinned $($after.state.digest). Not accepted."
   }
+}
+
+# ------------------------------------------------------------------ AppService
+# The app, CI built (self contained, pinned by SHA256), as the Windows service cortex-web
+# under its own virtual account. That account may read exactly the app's config and the
+# two secrets the app needs; the database superuser secret must stay out of its reach.
+
+function Get-AppDir($d) { Join-Path (Need $d 'installDir') (Need $d 'version') }
+function Get-AppAccount($d) { 'NT SERVICE\' + (Need $d 'serviceName') }
+
+function Get-AppEnv($d) {
+  @("CORTEX_PROFILE=local", "CORTEX_CONFIG=$(Need $d 'configPath')")
+}
+
+function Get-AclAccounts([string] $Path) {
+  if (-not (Test-Path $Path)) { return @() }
+  @((Get-Acl $Path).Access | ForEach-Object { "$($_.IdentityReference)" })
+}
+
+function Test-AppAlive([int] $Port) {
+  try { (Invoke-WebRequest -Uri "http://127.0.0.1:$Port/alive" -UseBasicParsing -TimeoutSec 5).StatusCode -eq 200 } catch { $false }
+}
+
+function Get-AppServiceState($d) {
+  $name = Need $d 'serviceName'
+  if ($name -notmatch '^[A-Za-z0-9_-]+$') { throw "bad service name $name" }
+  $dir = Get-AppDir $d; $sha = (Need $d 'sha256').ToLowerInvariant(); $account = Get-AppAccount $d
+  $port = [int](Need $d 'httpPort')
+  $drift = @()
+  $marker = Join-Path $dir '.cortex-artifact.json'
+  $haveSha = $null
+  if (Test-Path $marker) { $haveSha = (Get-Content $marker -Raw | ConvertFrom-Json).sha256 }
+  if ($haveSha -ne $sha) { $drift += 'binaries' }
+
+  $svc = Get-CimInstance Win32_Service -Filter "Name='$name'"
+  $deps = @()
+  if ($svc) { $deps = @((Get-Service -Name $name).ServicesDependedOn | ForEach-Object { $_.Name }) }
+  $exe = Join-Path $dir 'Cortex.Web.exe'
+  if (-not $svc) { $drift += 'service' }
+  else {
+    if (-not $svc.PathName.ToLowerInvariant().Contains($exe.ToLowerInvariant()) -or $svc.StartName -ne $account -or $svc.StartMode -ne 'Auto' -or $deps -notcontains (Need $d 'dependsOn')) { $drift += 'service-config' }
+    if ($svc.State -ne 'Running') { $drift += 'not-running' }
+  }
+  $envHave = @()
+  $key = "HKLM:\SYSTEM\CurrentControlSet\Services\$name"
+  if ((Test-Path $key) -and (Get-ItemProperty $key).PSObject.Properties['Environment']) { $envHave = @((Get-ItemProperty $key).Environment) }
+  if (($envHave -join "`n") -ne ((Get-AppEnv $d) -join "`n")) { $drift += 'environment' }
+
+  $readable = @(@(Need $d 'readFiles') | Where-Object { (Get-AclAccounts $_) -contains $account })
+  if ($readable.Count -ne @(Need $d 'readFiles').Count) { $drift += 'acl-read' }
+  $leaky = @(@(Need $d 'denyFiles') | Where-Object { (Get-AclAccounts $_) -contains $account })
+  if ($leaky.Count) { $drift += 'acl-deny' }
+
+  $alive = Test-AppAlive $port
+  if (-not $alive) { $drift += 'not-alive' }
+  $listening = @(Get-Listeners $port)
+  if (@($listening | Where-Object { $_ -notin '127.0.0.1', '::1' }).Count) { $drift += 'exposed' }
+
+  @{ ok = ($drift.Count -eq 0); state = [ordered]@{
+      version = (Need $d 'version'); url = (Need $d 'url'); sha256 = (Need $d 'sha256'); installDir = (Need $d 'installDir')
+      serviceName = $name; dependsOn = (Need $d 'dependsOn'); configPath = (Need $d 'configPath'); httpPort = $port
+      readFiles = @(Need $d 'readFiles'); denyFiles = @(Need $d 'denyFiles')
+      # Explicit else: an if without one yields AutomationNull, which ConvertTo-Json writes as {}.
+      account = $(if ($svc) { $svc.StartName } else { $null }); serviceState = $(if ($svc) { $svc.State } else { $null })
+      processId = $(if ($svc) { [int]$svc.ProcessId } else { $null })
+      alive = $alive; listeningOn = $listening; drift = $drift } }
+}
+
+function Set-AppService($d, $s) {
+  $name = Need $d 'serviceName'; $dir = Get-AppDir $d; $account = Get-AppAccount $d; $port = [int](Need $d 'httpPort')
+  $drift = @($s.state.drift)
+  $sc = "$env:SystemRoot\System32\sc.exe"
+  $restart = $false
+
+  if ($drift -contains 'binaries') {
+    if (Get-Service -Name $name -ErrorAction SilentlyContinue) { Stop-Service -Name $name -Force -ErrorAction SilentlyContinue }
+    $zip = Get-PinnedFile (Need $d 'url') (Need $d 'sha256') "cortex-app-$(Need $d 'version')-win-x64.zip" $CacheDir
+    Write-Step 'verified' @{ file = $zip }
+    Expand-ZipSubset $zip $dir '' @('')
+    $marker = [ordered]@{ url = (Need $d 'url'); sha256 = (Need $d 'sha256').ToLowerInvariant(); version = (Need $d 'version'); run_id = $RunId }
+    [IO.File]::WriteAllText((Join-Path $dir '.cortex-artifact.json'), ($marker | ConvertTo-Json), $Utf8)
+    $restart = $true
+  }
+
+  $binPath = '"' + (Join-Path $dir 'Cortex.Web.exe') + '" web'
+  $verb = if (Get-Service -Name $name -ErrorAction SilentlyContinue) { 'config' } else { 'create' }
+  $r = Invoke-Native $sc @($verb, $name, 'binPath=', $binPath, 'obj=', $account, 'start=', 'auto', 'depend=', (Need $d 'dependsOn'), 'DisplayName=', 'Cortex app')
+  Write-Step "service-$verb" @{ exit = $r.Code; out = (Get-Tail $r.Out 300) }
+  if ($r.Code) { throw "sc $verb failed: $($r.Out) $($r.Err)" }
+  Invoke-Native $sc @('description', $name, 'Cortex local profile app (managed by Cortex provisioning).') | Out-Null
+  $r = Invoke-Native $sc @('failure', $name, 'reset=', '86400', 'actions=', 'restart/5000/restart/5000/restart/30000')
+  Write-Step 'service-recovery' @{ exit = $r.Code }
+
+  $key = "HKLM:\SYSTEM\CurrentControlSet\Services\$name"
+  Set-ItemProperty -Path $key -Name Environment -Type MultiString -Value (Get-AppEnv $d)
+  if ($drift -contains 'environment' -or $drift -contains 'service-config') { $restart = $true }
+
+  foreach ($f in @(Need $d 'readFiles')) {
+    $r = Invoke-Native "$env:SystemRoot\System32\icacls.exe" @($f, '/grant', "${account}:(R)")
+    if ($r.Code) { throw "icacls grant on $f failed: $($r.Out)" }
+  }
+  foreach ($f in @(Need $d 'denyFiles')) {
+    if (Test-Path $f) { Invoke-Native "$env:SystemRoot\System32\icacls.exe" @($f, '/remove:g', $account) | Out-Null }
+  }
+  Write-Step 'acl' @{ account = $account; read = @(Need $d 'readFiles'); denied = @(Need $d 'denyFiles') }
+
+  $svc = Get-Service -Name $name
+  if ($svc.Status -eq 'Running' -and $restart) { Restart-Service -Name $name -Force; Write-Step 'service-restarted' }
+  elseif ($svc.Status -ne 'Running') {
+    foreach ($c in @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) {
+      throw "port $port is already used by pid $($c.OwningProcess); stop it first"
+    }
+    Start-Service -Name $name; Write-Step 'service-started'
+  }
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  while (-not (Test-AppAlive $port)) {
+    if ($sw.Elapsed.TotalSeconds -gt 60) { throw "app not alive on port $port within 60s; see the Application event log (source cortex-web)" }
+    Start-Sleep -Seconds 1
+  }
+  Write-Step 'alive' @{ seconds = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
 }
 
 # ------------------------------------------------------------------ LocalInstall

@@ -1,0 +1,168 @@
+{
+  "$schema": "https://aka.ms/dsc/schemas/v3/bundled/resource/manifest.json",
+  "type": "Cortex.Windows/AppService",
+  "version": "0.1.0",
+  "description": "CI built app as the Windows service cortex-web under its own virtual account, least privilege file access.",
+  "tags": [
+    "cortex",
+    "windows"
+  ],
+  "get": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "AppService",
+      "-Operation",
+      "get"
+    ],
+    "input": "stdin"
+  },
+  "test": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "AppService",
+      "-Operation",
+      "test"
+    ],
+    "input": "stdin",
+    "return": "state"
+  },
+  "set": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Program Files\\Cortex\\provisioning\\resources\\cortex-dsc.ps1",
+      "-Resource",
+      "AppService",
+      "-Operation",
+      "set"
+    ],
+    "input": "stdin",
+    "implementsPretest": true,
+    "return": "state"
+  },
+  "exitCodes": {
+    "0": "Success",
+    "1": "Error, see stderr and steps.jsonl"
+  },
+  "schema": {
+    "embedded": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "required": [
+        "version",
+        "url",
+        "sha256",
+        "installDir",
+        "serviceName",
+        "dependsOn",
+        "configPath",
+        "httpPort",
+        "readFiles",
+        "denyFiles"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$|^PENDING$"
+        },
+        "installDir": {
+          "type": "string"
+        },
+        "serviceName": {
+          "type": "string"
+        },
+        "dependsOn": {
+          "type": "string"
+        },
+        "configPath": {
+          "type": "string"
+        },
+        "httpPort": {
+          "type": "integer"
+        },
+        "readFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "denyFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "account": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "serviceState": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "processId": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "readOnly": true
+        },
+        "alive": {
+          "type": "boolean",
+          "readOnly": true
+        },
+        "listeningOn": {
+          "type": "array",
+          "readOnly": true
+        },
+        "drift": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "readOnly": true
+        },
+        "_inDesiredState": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "readOnly": true
+        }
+      }
+    }
+  }
+}
