@@ -44,6 +44,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with: { dotnet-version: 10.0.x }
       - name: Leak suite and prompt injection corpus
+        env: { CORTEX_TEST_PG: "Host=localhost;Username=cortex_owner;Password=ci;Database=cortex" }
         run: dotnet test --project tests/Cortex.SecurityTests -c Release
 
   image:
