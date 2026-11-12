@@ -24,7 +24,7 @@
 ## Repo map
 | Path | Holds |
 |---|---|
-| `docs/`, `docs/adr/` | 00 to 14, ten decision records |
+| `docs/`, `docs/adr/` | 00 to 18, fourteen decision records |
 | `infra/` | terraform, ansible roles, compose per server |
 | `db/migrations/` | fail closed tenancy SQL |
 | `src/`, `tests/` | `Cortex.sln` skeleton; unit, integration, security, perf |
