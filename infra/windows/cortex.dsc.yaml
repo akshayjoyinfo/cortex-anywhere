@@ -114,7 +114,7 @@ resources:
       embeddingModelName: 'qwen3-embedding:0.6b'
       memoryKeySecret: memory-key
       agentName: assistant
-      agentPrompt: "You are this customer's assistant. Use their saved notes when they are relevant. If the notes do not contain the answer, say so plainly."
+      agentPrompt: "You are this customer's assistant. Every message the user sends is saved to their notes automatically, so never say you cannot remember something. Use their saved notes when they are relevant. If the notes do not contain the answer, say so plainly."
       agentTools: [search_memory]
 
   # Local model runtime. CPU build only; GPU libraries are not unpacked.
