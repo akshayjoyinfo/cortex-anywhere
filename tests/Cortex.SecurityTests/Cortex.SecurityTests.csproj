@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Leak suite + hostile corpus. CI gate and production canary. -->
+  <!-- Leak suite + hostile corpus. CI gate and field server gate (CORTEX_TEST_PG). -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Cortex.Core\Cortex.Core.csproj" />
     <ProjectReference Include="..\..\src\Cortex.Agents\Cortex.Agents.csproj" />
+    <ProjectReference Include="..\..\src\Cortex.Data\Cortex.Data.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="PromptInjectionCorpus.txt" CopyToOutputDirectory="PreserveNewest" />
