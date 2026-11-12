@@ -279,18 +279,28 @@ try {
           if ($c.RemoteAddress -notin '127.0.0.1', '::1', '0.0.0.0', '::') { $seen["$($c.RemoteAddress):$($c.RemotePort) pid $($c.OwningProcess) $($c.State)"] = 1 }
         }
         $samples++
+        if ($samples -eq 1) { New-Item -ItemType File -Force "$stopFile.started" | Out-Null }
         Start-Sleep -Milliseconds 500
       }
       [pscustomobject]@{ samples = $samples; remote = @($seen.Keys) }
     }
 
-    $corpus = @(Get-Content (Join-Path $Bundle 'tests\Cortex.SecurityTests\PromptInjectionCorpus.txt') | Where-Object { $_.Trim() -ne '' })
+    # Wait until the watcher is sampling, so the whole corpus is covered.
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while (-not (Test-Path "$stopFile.started")) {
+      if ($sw.Elapsed.TotalSeconds -gt 30) { throw 'outbound watcher did not start within 30s' }
+      Start-Sleep -Milliseconds 250
+    }
+
+    # [string]: Windows PowerShell 5.1 attaches PSPath and friends to Get-Content lines, and
+    # ConvertTo-Json would then send an object instead of the text.
+    $corpus = @(Get-Content (Join-Path $Bundle 'tests\Cortex.SecurityTests\PromptInjectionCorpus.txt') | ForEach-Object { [string]$_ } | Where-Object { $_.Trim() -ne '' })
     $results = @()
     $i = 0
     foreach ($attack in $corpus) {
       $i++
       $sw = [Diagnostics.Stopwatch]::StartNew()
-      $r = Invoke-HttpPost "$base/api/agents/assistant/runs" (@{ input = $attack } | ConvertTo-Json -Compress)
+      $r = Invoke-HttpPost "$base/api/agents/assistant/runs" (@{ input = [string]$attack } | ConvertTo-Json -Compress)
       $body = $null
       if ($r.status -eq 200) { $body = $r.body | ConvertFrom-Json }
       $calls = @($(if ($body) { $body.toolCalls }))
